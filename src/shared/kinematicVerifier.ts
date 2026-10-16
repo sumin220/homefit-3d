@@ -228,8 +228,16 @@ export function verifyRoomScene3D(
 
   for (const cab of overheadCabinets) {
     const cabBottomY = cab.position.y - cab.dimensions.height / 2;
-    const cabInnerEdgeX =
-      cab.position.x >= 0 ? cab.position.x - cab.dimensions.width / 2 : cab.position.x + cab.dimensions.width / 2;
+    const isBackWallMounted = cab.dimensions.width >= cab.dimensions.depth;
+    const protrusionM = isBackWallMounted ? cab.dimensions.depth : cab.dimensions.width;
+    const cabInnerEdgeX = isBackWallMounted
+      ? cab.position.x
+      : cab.position.x >= 0
+      ? cab.position.x - cab.dimensions.width / 2
+      : cab.position.x + cab.dimensions.width / 2;
+    const cabFrontEdgeZ = isBackWallMounted
+      ? cab.position.z + cab.dimensions.depth / 2
+      : cab.position.z;
 
     // Evaluate head trajectory envelope across sit-to-stand and pivot waypoints
     const userStandingHeadTopM = profile.userHeightCm / 100;
@@ -238,7 +246,9 @@ export function verifyRoomScene3D(
     const clutterLateralShiftM = floorClutter.length > 0 ? 0.14 : 0.0;
 
     // Minimum clearance between user's 3D head arc and cabinet inner face/bottom
-    const horizontalDistanceToCabM = Math.abs(cabInnerEdgeX) - (forwardPitchM + clutterLateralShiftM);
+    const horizontalDistanceToCabM = isBackWallMounted
+      ? 0.56 - protrusionM - (forwardPitchM + clutterLateralShiftM - 0.16)
+      : Math.abs(cabInnerEdgeX) - (forwardPitchM + clutterLateralShiftM);
     const verticalOverlapM = userStandingHeadTopM - cabBottomY;
 
     const effectiveClearanceCm =
@@ -256,16 +266,16 @@ export function verifyRoomScene3D(
         hazardType: 'OVERHEAD_GLASS_HEAD_STRIKE',
         layer: 'overhead',
         title: isGlass
-          ? `3D Head-Strike Collision with Overhead Glass Cabinet (${effectiveClearanceCm}cm penetration!)`
+          ? `3D Head-Strike Collision with Overhead Glass Shelf (${effectiveClearanceCm}cm penetration!)`
           : `Overhead Protruding Shelf Head-Strike Hazard (${effectiveClearanceCm}cm clearance)`,
         description: `${cab.name} (bottom edge at Y=${Math.round(cabBottomY * 100)}cm, protruding ${Math.round(
-          cab.dimensions.width * 100
-        )}cm from wall) directly intersects the user's +${
+          protrusionM * 100
+        )}cm from wall above toilet) directly intersects the user's +${
           profile.sitToStandForwardPitchCm
         }cm forward head-lean arc during sit-to-stand and crutch pivoting${
           isGlass ? '—creating an acute tempered-glass shatter & head trauma hazard.' : '.'
         }`,
-        causalChain: `1. Floor caddies narrow crutch base to ${floorClearanceMinCm}cm → 2. User reaches for wall grab bar & pitches torso +${
+        causalChain: `1. Floor basins narrow crutch base to ${floorClearanceMinCm}cm → 2. User reaches for wall grab bar & pitches torso +${
           profile.sitToStandForwardPitchCm
         }cm forward during sit-to-stand → 3. Head trajectory (Y=${Math.round(
           (userStandingHeadTopM - 0.12) * 100
@@ -274,15 +284,15 @@ export function verifyRoomScene3D(
         waypointId: waypoints[2]?.id || 'wp-3',
         collisionPoint3D: {
           x: cabInnerEdgeX,
-          y: Math.max(cabBottomY + 0.06, 1.48),
-          z: cab.position.z,
+          y: Math.max(cabBottomY + 0.05, 1.46),
+          z: cabFrontEdgeZ,
         },
         measuredValueCm: effectiveClearanceCm,
         requiredValueCm: 20,
         epistemicNote:
           cab.measurementStatus === 'visual_estimate'
-            ? '3D head-strike envelope verified against cabinet depth & mount height from photo; measure exact wall protrusion on site.'
-            : 'Verified safe head clearance after cabinet recess & bumper guard.',
+            ? '3D head-strike envelope verified against shelf depth & mount height from photo; measure exact wall protrusion on site.'
+            : 'Verified safe head clearance after shelf recess & bumper guard.',
       });
     }
 
@@ -299,11 +309,11 @@ export function verifyRoomScene3D(
         hazardType: 'HIGH_REACH_CRUTCH_RELEASE',
         layer: 'overhead',
         title: `One-Handed Overhead Reach Hazard (Y=${cabReachHeightCm}cm > ${profile.maxSafeReachHeightCm}cm Safe Limit)`,
-        description: `Opening ${cab.name} at Y=${cabReachHeightCm}cm forces a ${profile.id} user to release one crutch handle and crane upward on slippery tiles, risking immediate loss of balance and cabinet impact.`,
-        causalChain: `Daily items stored at Y=${cabReachHeightCm}cm → User releases crutch support to open glass door → Loss of 3-point stability on wet tile floor.`,
+        description: `Reaching ${cab.name} at Y=${cabReachHeightCm}cm forces a ${profile.id} user to release one crutch handle and crane upward on slippery tiles, risking immediate loss of balance and glass shelf impact.`,
+        causalChain: `Daily items stored at Y=${cabReachHeightCm}cm above toilet → User releases crutch support to reach shelf → Loss of 3-point stability on wet tile floor.`,
         objectIds: [cab.id],
         waypointId: waypoints[3]?.id || 'wp-4',
-        collisionPoint3D: { x: cabInnerEdgeX, y: cab.position.y, z: cab.position.z + 0.1 },
+        collisionPoint3D: { x: cabInnerEdgeX, y: cab.position.y, z: cabFrontEdgeZ },
         measuredValueCm: cabReachHeightCm,
         requiredValueCm: profile.maxSafeReachHeightCm,
         epistemicNote: 'Biomechanical constraint: crutch users require waist/eye-level storage (85–115cm) to keep both crutches grounded.',
