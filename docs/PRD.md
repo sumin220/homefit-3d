@@ -1,4 +1,4 @@
-# Product Requirements Document (PRD v1.0) — HomeFit 3D (먼저가봄 홈)
+# Product Requirements Document (PRD v1.0) — HomeFit 3D (Pre-Visit Home Safety Studio)
 
 - **Date:** October 16, 2026
 - **Track:** Track 3 — Google AI for Social Good
@@ -9,7 +9,7 @@
 
 ## 1. Product Definition
 
-**HomeFit 3D (먼저가봄 홈)** is an indoor 3D (Floor · Mid · Overhead) mobility barrier verifier and home modification physics simulator designed for **crutch and wheelchair users** (as well as their caregivers and occupational therapists) preparing for hospital discharge or daily indoor living.
+**HomeFit 3D (Pre-Visit Home Safety Studio)** is an indoor 3D (Floor · Mid · Overhead) mobility barrier verifier and home modification physics simulator designed for **crutch, wheelchair, walker, and cane users** (as well as their caregivers and occupational therapists) preparing for hospital discharge or daily indoor living.
 
 Given a single indoor room photo and the resident's biometric & mobility-aid constraints, **Gemini 4 Argon (`gemini-4-argon`)** extracts spatial structures and hazard candidates across **three elevation layers (Floor `0–30cm`, Mid-Torso `30–130cm`, and Overhead `130–195cm`)**. An isomorphic **Three.js 3D Physics & Kinematic Verifier (`kinematicVerifier.ts`)** then simulates articulated full-body trajectories—walking, 360° pivoting, sit-to-stand forward head pitch, and overhead reach—to detect 3D collisions, separate visual estimates from verified tape measurements, and synthesize a verified **Before → After** layout modification patch.
 
@@ -36,6 +36,7 @@ However, a severe accident occurred: while stepping around plastic floor basins 
 3. **Divergent Biomechanical Constraints by Mobility Aid:**
    - **Manual Wheelchair Users:** Require `>= 78cm` clear passage width, `>= 140cm` 360° turning circle diameter, `<= 1.5cm` threshold lip, and `<= 120cm` seated reach height.
    - **Bilateral Crutch Users:** Require `>= 68cm` bilateral crutch-tip stance width, high-friction wet-floor matting, unobstructed **Sit-to-Stand forward head-pitch clearance (`+28cm`)**, and waist/eye-level storage (`85–115cm`) so neither hand releases a crutch handle.
+   - **Folding Walker & Cane Users:** Require `>= 64cm`–`62cm` stance clearance, `1.5cm`–`2.5cm` threshold clearance, and continuous wall grab-bar reach trajectories.
 4. **Epistemic Gap Between Single-Photo Estimates and On-Site Tape Measurements:**
    - A single 2D photo cannot guarantee millimeter-exact dimensions or non-visual properties (wet tile friction coefficient, internal wall-stud pull strength). An honest AI system must explicitly distinguish `Standard Spec`, `Visual Estimate (Needs Tape Measure)`, and `User Measured`, plus surface `Unverified Zones`.
 5. **Real-World Fixture Constraints (Human-in-the-Loop Lock):**
@@ -70,11 +71,11 @@ However, a severe accident occurred: while stepping around plastic floor basins 
 
 | ID | Feature | Definition of Done |
 | :--- | :--- | :--- |
-| **F01** | **Biometric & Mobility Profile Configuration** | Switch between `Bilateral Crutches` and `Manual Wheelchair` and adjust `userHeightCm`, `minPassageWidthCm`, `turningRadiusCm`, `maxStepThresholdCm`, `sitToStandForwardPitchCm`, and `maxSafeReachHeightCm` with instant 3D re-verification. |
-| **F02** | **Real-Case Presets & Custom Room Photo Upload** | Provide Preset 1 (*Parent's Bathroom Real Overhead Glass Accident*) and Preset 2 (*Post-Surgery Living-to-Bedroom Corridor Pinch*), plus custom JPG/PNG/WebP photo upload analyzed by `gemini-4-argon`. |
+| **F01** | **Biometric & Mobility Profile Configuration** | Switch across 4 mobility aids (`Bilateral Crutches`, `Manual Wheelchair`, `Folding Walker`, `Single Cane + Grab Bar`) and adjust `userHeightCm`, `minPassageWidthCm`, `turningRadiusCm`, `maxStepThresholdCm`, `sitToStandForwardPitchCm`, and `maxSafeReachHeightCm` with instant 3D re-verification. |
+| **F02** | **Real-Case Presets & Custom Room Photo Upload** | Provide Preset 1 (*Parent's Bathroom Real Overhead Glass Accident* with before/after shattered glass comparison) and Preset 2 (*Post-Surgery Living-to-Bedroom Corridor Pinch*), plus custom JPG/PNG/WebP photo upload analyzed by `gemini-4-argon`. |
 | **F03** | **3-Layer Multimodal Spatial Extraction** | Extract 2D bounding boxes (`box2d`) and 3D bounding volumes categorized into `floor` (`0–30cm`), `mid` (`30–130cm`), and `overhead` (`130–195cm`) layers with material hazard tags (`tempered_glass`, `wet_slippery_tile`, etc.). |
 | **F04** | **Epistemic Uncertainty & Unverified Zone Separation** | Explicitly list single-photo blind spots (`unverifiedZones`, such as wet tile dynamic friction and wall anchor pull-out strength) with interactive on-site confirmation checkboxes. |
-| **F05** | **Three.js 3D Room & 3-Layer Hazard Rendering** | Render interactive 3D room geometry, elevation slice planes, object bounding boxes, downward overhead hazard projection zones, and collision shockwave spheres. |
+| **F05** | **Three.js 3D Architectural Twin & Photo AR Overlay** | Render procedural 3D architectural meshes (`architectural3DBuilder.ts`), 2D real-photo AR bounding overlays (`PhotoAROverlay.tsx`), elevation slice planes, downward overhead hazard projection zones, and collision shockwave spheres. |
 | **F06** | **Articulated Full-Body Avatar & Sit-to-Stand Head Arc** | Animate an articulated 3D crutch or wheelchair avatar across waypoints (`Step 1` to `Step 4`) and render the 3D `CatmullRomCurve3` head-pitch trajectory arc. |
 | **F07** | **Deterministic 3-Layer Kinematic Physics Verifier** | Mathematically evaluate threshold lips, floor clutter stance narrowing, corridor pinch gaps, 360° turning cylinders, sit-to-stand overhead head-strike intersections, and one-handed high reach hazards in [`kinematicVerifier.ts`](../src/shared/kinematicVerifier.ts). |
 | **F08** | **On-Site Tape-Measure Override (`Visual Estimate → User Measured`)** | Allow users to input actual tape-measured dimensions (`widthCm`, `heightCm`, `depthCm`, `mountHeightYCm`), promoting the object to `user_measured` and immediately recalculating 3D geometry and collision status. |

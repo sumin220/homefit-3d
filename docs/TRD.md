@@ -1,4 +1,4 @@
-# Technical Requirements Document (TRD v1.0) — HomeFit 3D (먼저가봄 홈)
+# Technical Requirements Document (TRD v1.0) — HomeFit 3D (Pre-Visit Home Safety Studio)
 
 - **Date:** October 16, 2026
 - **Companion Spec:** [docs/PRD.md](./PRD.md)
@@ -14,8 +14,8 @@
 | Layer | Technology | Version / Spec | Rationale |
 | :--- | :--- | :--- | :--- |
 | **AI Spatial Reasoning Engine** | **Gemini 4 Argon (`gemini-4-argon`)** | `@google/genai` (`^2.29.1`), Interactions API | Multimodal 3-layer (`Floor`, `Mid`, `Overhead`) hazard extraction, causal chain reasoning (`thinking_level: "medium"`), and constraint-aware remediation synthesis. |
-| **Frontend UI** | **React 19 + TypeScript + Tailwind CSS v4** | React `19.1.0`, Vite `6.3.1` | Responsive 3-pane synchronized workspace (2D Photo Evidence + 3D Kinematic Viewport + Verification & HITL Console). |
-| **3D WebGL Rendering** | **Three.js (`three`)** | `^0.175.0` | Real-time 3D room volume, 3 elevation slice planes, articulated crutch/wheelchair avatar, 3D `CatmullRomCurve3` head-pitch trajectory tube, and pulsing collision spheres. |
+| **Frontend UI** | **React 19 + TypeScript + Tailwind CSS v4** | React `19.1.0`, Vite `6.3.1` | Responsive 3-pane synchronized workspace (2D Photo AR Evidence + 3D Kinematic Viewport + Verification & HITL Console) with contextual hover tooltips ([`HoverTooltip.tsx`](../src/client/components/HoverTooltip.tsx)). |
+| **3D WebGL Rendering** | **Three.js (`three`)** | `^0.175.0` | Real-time procedural 3D architectural fixtures ([`architectural3DBuilder.ts`](../src/client/components/architectural3DBuilder.ts)), 3 elevation slice planes, 4 articulated mobility avatars, 3D `CatmullRomCurve3` head-pitch trajectory tube, and pulsing collision spheres. |
 | **Deterministic Physics Verifier** | **Isomorphic TypeScript Kinematic Engine** ([`src/shared/kinematicVerifier.ts`](../src/shared/kinematicVerifier.ts)) | Shared pure TypeScript module (Client + Server) | Guarantees hallucination-free geometric collision checks, instant slider/tape-measure re-verification (0ms latency), and deterministic closed-loop pass/fail gating. |
 | **Backend Framework** | **NestJS (`@nestjs/core`, `@nestjs/common`, `@nestjs/platform-express`)** | NestJS `11.x`, Node `22` | Modular Dependency Injection architecture ([`AppModule`](../src/server/app.module.ts), [`HomeFitController`](../src/server/homefit.controller.ts), [`ArgonService`](../src/server/argon.service.ts)), server-side API key security, and static SPA serving. |
 | **Cloud Deployment** | **Google Cloud Run (Docker)** | `PORT=8080`, Single Container | Stateless, auto-scaling container deployment on Google Cloud Run (`asia-northeast3`). |
@@ -62,12 +62,12 @@ flowchart TB
 
 | PRD ID | Requirement | Primary Module / Symbol | Verification Method |
 | :--- | :--- | :--- | :--- |
-| **F01** | Mobility Aid & Biometric Sliders | [`MOBILITY_PROFILES`](../src/shared/presetScenes.ts), [`IndoorMobilityProfile`](../src/shared/types.ts) | Adjusting height (`148–188cm`), forward head pitch (`12–42cm`), or stance width immediately updates 3D head-strike clearance and collision count. |
+| **F01** | Mobility Aid & Biometric Sliders | [`MOBILITY_PROFILES`](../src/shared/presetScenes.ts), [`IndoorMobilityProfile`](../src/shared/types.ts) | Switching across 4 mobility aids (`Crutches`, `Wheelchair`, `Walker`, `Cane`) or adjusting height (`148–188cm`), forward head pitch (`12–42cm`), or stance width immediately updates 3D head-strike clearance and collision count. |
 | **F02** | Real-Case Presets & Custom Upload | [`PRESET_SCENES`](../src/shared/presetScenes.ts), [`HomeFitController.analyzeRoom`](../src/server/homefit.controller.ts) | Switching between Preset 1 (Parent's Bathroom) and Preset 2 (Corridor) or uploading a room photo updates both 2D and 3D views. |
 | **F03** | 3-Layer Spatial & Material Extraction | [`analyzeRoomWithArgon`](../src/server/argonEngine.ts), [`SceneObject3D`](../src/shared/types.ts) | Objects carry normalized `box2d: [ymin, xmin, ymax, xmax]`, 3D `position`/`dimensions`, `layer` (`floor`/`mid`/`overhead`), and `materialHazard`. |
 | **F04** | Epistemic Blind-Spot Separation | [`UnverifiedZone`](../src/shared/types.ts), [`verifyRoomScene3D`](../src/shared/kinematicVerifier.ts) | Unverified non-visual factors (e.g., wet tile friction, wall stud anchor strength) prevent `VERIFIED_SAFE_PASS` until checked on site. |
-| **F05** | Three.js 3D Volumetric Viewport | [`RoomCanvas3D.tsx`](../src/client/components/RoomCanvas3D.tsx) | Renders 3D room bounds, `0.30m` / `1.30m` / `1.85m` slice planes, tempered-glass danger zone, and pulsing collision spheres. |
-| **F06** | Articulated Avatar & Head-Pitch Arc | [`RoomCanvas3D.tsx`](../src/client/components/RoomCanvas3D.tsx) | Renders bilateral crutches or manual wheelchair with `140cm` turning ring and `CatmullRomCurve3` 3D head trajectory arc. |
+| **F05** | Three.js 3D Volumetric Viewport & AR Overlay | [`RoomCanvas3D.tsx`](../src/client/components/RoomCanvas3D.tsx), [`PhotoAROverlay.tsx`](../src/client/components/PhotoAROverlay.tsx), [`architectural3DBuilder.ts`](../src/client/components/architectural3DBuilder.ts) | Renders 3D room bounds, procedural 3D furniture/fixtures, 2D AR bounding overlays, tempered-glass danger zone, and pulsing collision spheres. |
+| **F06** | Articulated Avatar & Head-Pitch Arc | [`RoomCanvas3D.tsx`](../src/client/components/RoomCanvas3D.tsx), [`architectural3DBuilder.ts`](../src/client/components/architectural3DBuilder.ts) | Renders articulated 3D human with crutches, manual wheelchair, folding walker, or cane + grab bar and `CatmullRomCurve3` 3D head trajectory arc. |
 | **F07** | Deterministic 3-Layer Physics Engine | [`verifyRoomScene3D`](../src/shared/kinematicVerifier.ts) | Evaluates 6 hazard rules across `floor`, `mid`, and `overhead` layers. |
 | **F08** | On-Site Tape-Measure Override | [`applyDimensionOverridesToObjects`](../src/shared/kinematicVerifier.ts) | Editing object dimensions promotes `visual_estimate` → `user_measured` and recalculates 3D collisions immediately. |
 | **F09** | Caregiver Fixture Locking (HITL) | [`applyUserLocksToRemediation`](../src/shared/kinematicVerifier.ts) | Locking an overhead cabinet applies non-destructive film + bumper guard adaptation; locking a corridor obstacle retains the pinch warning. |

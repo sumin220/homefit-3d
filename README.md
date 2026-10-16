@@ -1,8 +1,7 @@
-# HomeFit 3D (먼저가봄 홈)
+# HomeFit 3D (Pre-Visit Home Safety Studio)
 **3D Indoor Mobility & Head-to-Toe Hazard Physics Verifier Powered by Gemini 4 Argon (`gemini-4-argon`)**
 
 - 🌐 **Live Cloud Run Deployment:** [https://homefit-3d-778497310901.asia-northeast3.run.app](https://homefit-3d-778497310901.asia-northeast3.run.app)
-- 🎬 **60-Second Demo Video (with English Voiceover):** [`docs/HomeFit3D_Demo_60s.mp4`](docs/HomeFit3D_Demo_60s.mp4)
 
 > **Google DeepMind AI Hackathon — Track 3: Google AI for Social Good**
 > *Accessibility doesn't stop at the floor. Born from a real accident where a crutch-using parent struck an overhead glass cabinet while navigating a cramped bathroom, HomeFit 3D uses Gemini 4 Argon (`gemini-4-argon`) to reconstruct home photos into an interactive Three.js 3D space, run 3D head-to-toe kinematic collision simulations, and autonomously verify safer room layouts.*
@@ -32,7 +31,7 @@ HomeFit 3D implements a strict **Observe → Act → Verify → Remediate** loop
    - Extracts a complete 3D scene graph (`roomDimensions`, `beforeObjects` with 2D normalized `[ymin, xmin, ymax, xmax]` + metric 3D `position`/`dimensions`, `afterObjects`, `remediationChecklist`, and `unverifiedZones`) across `Floor`, `Mid`, and `Overhead` layers.
    - Automatically detects non-indoor or blurry photos (`isIndoorRoom: false`) and halts false clearance claims.
 2. **Deterministic 3D Full-Body Kinematic Simulation (`Three.js` + `kinematicVerifier.ts`):**
-   - Simulates an articulated 3D character (`Crutches User`, `Manual Wheelchair User`, `Walker User`, or `Cane User`) along indoor waypoints.
+   - Simulates an articulated 3D character (`Crutches User`, `Manual Wheelchair User`, `Walker User`, or `Cane + Grab Bar User`) along indoor waypoints.
    - Projects **real-time 3D-to-2D Floating HUD Callout Badges** (`💥 Head Strike (-8cm)`, `📏 Stance 44cm < 68cm`, `🔒 Locked`, `📏 Measured`) directly over 3D objects in the viewport.
 3. **Autonomous 3D Spatial Remediation & Vector Visualization:**
    - When the physics engine returns `Incompatible (FAIL)`, Argon synthesizes a 3D layout patch and renders **3D dashed ghost wireframes + green displacement vector arrows (`THREE.ArrowHelper`)** in `AFTER` mode showing exact furniture relocations and cabinet depth reductions.
@@ -41,7 +40,7 @@ HomeFit 3D implements a strict **Observe → Act → Verify → Remediate** loop
    - **On-Site 4-Dimension Tape-Measure Override (`F08`):** Clicking any 3D object lets caregivers override `visual_estimate` dimensions (`Width`, `Height`, `Depth`, `CenterY` in `cm`) with real physical tape-measure readings (`user_measured`), immediately updating the 3D mesh and re-running the collision engine.
    - **Single-Photo Blind-Spot Audit (`F04` & `F12`):** Explicitly lists occluded floor/stud blind spots and enforces a 3-state Epistemic Verdict (`Incompatible` / `Needs checking` / `Verified Safe`).
    - **Caregiver Fixture Locks (`F09`):** Locking a built-in cabinet or heavy furniture forces the solver to compute a non-destructive safety adaptation (e.g., shatter-guard film + edge bumper pads + waist-level `105cm` caddy).
-   - **1-Page Printable Safety & Korean Welfare Subsidy Spec Sheet (`F10` & `F13`):** Exports a 1-page contractor & subsidy schedule mapped to Korean Long-Term Care Insurance codes (`노인장기요양보험 복지용구 85% 지원`: `F01010`, `F02010`, `F03010`).
+   - **1-Page Printable Safety & Welfare Subsidy Spec Sheet (`F10` & `F13`):** Exports a 1-page contractor & subsidy schedule mapped to Long-Term Care Insurance codes (`85% Welfare Equipment Subsidy`: `F01010`, `F02010`, `F03010`).
 
 ---
 
