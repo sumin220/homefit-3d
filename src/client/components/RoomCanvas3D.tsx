@@ -7,9 +7,28 @@ import {
   SceneObject3D,
   TrajectoryWaypoint,
 } from '../../shared/types';
-import { Eye, Layers, RotateCcw, ShieldAlert, CheckCircle2, Lock, Tag } from 'lucide-react';
+import {
+  Eye,
+  Layers,
+  RotateCcw,
+  ShieldAlert,
+  CheckCircle2,
+  Tag,
+  Columns,
+  Camera,
+  Box,
+} from 'lucide-react';
+import { PhotoAROverlay } from './PhotoAROverlay';
+import { HoverTooltip } from './HoverTooltip';
+import {
+  buildArchitecturalRoomShell,
+  createArchitecturalObjectGroup,
+  createArticulatedHumanAvatar,
+} from './architectural3DBuilder';
 
 interface RoomCanvas3DProps {
+  photoUrl?: string;
+  roomTitle?: string;
   roomDimensions: { width: number; height: number; depth: number };
   objects: SceneObject3D[];
   beforeObjects?: SceneObject3D[];
@@ -24,17 +43,19 @@ interface RoomCanvas3DProps {
 }
 
 type CameraPreset = 'isometric' | 'head_strike' | 'floor_stance' | 'top_down';
+type SimulationViewMode = 'split' | 'photo_ar' | 'twin_3d';
 
 interface HudCalloutDescriptor {
   id: string;
   objectId: string | null;
   position3D: THREE.Vector3;
   badgeText: string;
-  subText: string;
   tone: 'critical' | 'warning' | 'locked' | 'measured' | 'remediated';
 }
 
 export const RoomCanvas3D: React.FC<RoomCanvas3DProps> = ({
+  photoUrl = '/presets/preset-1-bathroom-cabinet.png',
+  roomTitle = 'Indoor Accessibility Simulation',
   roomDimensions,
   objects,
   beforeObjects = [],
@@ -49,33 +70,59 @@ export const RoomCanvas3D: React.FC<RoomCanvas3DProps> = ({
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const hudItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [viewMode, setViewMode] = useState<SimulationViewMode>('split');
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('isometric');
-  const [showLayerSlices, setShowLayerSlices] = useState<boolean>(true);
+  const [showLayerSlices, setShowLayerSlices] = useState<boolean>(false);
   const [showHudCallouts, setShowHudCallouts] = useState<boolean>(true);
 
   // Store spherical orbit coordinates in a ref for interactive drag/zoom
   const orbitRef = useRef({
-    theta: -0.65, // horizontal angle (radians)
-    phi: 1.05, // vertical angle from top (radians)
-    radius: 3.7,
-    target: new THREE.Vector3(0, 0.95, 0),
+    theta: -0.58,
+    phi: 1.08,
+    radius: 3.45,
+    target: new THREE.Vector3(0, 0.92, 0),
     isDragging: false,
     lastX: 0,
     lastY: 0,
   });
 
-  // Build 3D-to-2D HUD callout descriptors for hazards, locked fixtures, tape-measured items, and AFTER displacements
+  // De-cluttered 3D-to-2D HUD pins (concise 1-line pills, prioritized so they never flood the view)
   const hudCallouts: HudCalloutDescriptor[] = React.useMemo(() => {
     const items: HudCalloutDescriptor[] = [];
     const seenObjectIds = new Set<string>();
+    const hazardObjIds = new Set<string>();
+    hazards.forEach((h) => h.objectIds.forEach((id) => hazardObjIds.add(id)));
 
-    // 1. Active Collision Hazards (highest visual priority)
+    // 1. Selected object always gets a pin if not already covered
+    if (selectedObjectId) {
+      const selObj = objects.find((o) => o.id === selectedObjectId);
+      if (selObj) {
+        seenObjectIds.add(selObj.id);
+        items.push({
+          id: `hud-sel-${selObj.id}`,
+          objectId: selObj.id,
+          position3D: new THREE.Vector3(
+            selObj.position.x,
+            selObj.position.y + selObj.dimensions.height / 2 + 0.12,
+            selObj.position.z
+          ),
+          badgeText: `🎯 ${selObj.name.split('(')[0].trim()}`,
+          tone: hazardObjIds.has(selObj.id)
+            ? 'critical'
+            : selObj.lockedByUser
+            ? 'locked'
+            : 'remediated',
+        });
+      }
+    }
+
+    // 2. Primary Collision Hazards (concise single-line label)
     hazards.forEach((haz) => {
       if (activeLayerFilter !== 'all' && activeLayerFilter !== haz.layer) return;
       const primaryObjId = haz.objectIds[0] || null;
       if (primaryObjId) seenObjectIds.add(primaryObjId);
 
-      let shortBadge = `⚠️ ${haz.layer.toUpperCase()}: ${haz.measuredValueCm}cm`;
+      let shortBadge = `⚠️ ${haz.measuredValueCm}cm`;
       if (haz.hazardType === 'OVERHEAD_GLASS_HEAD_STRIKE') {
         shortBadge = `💥 Head Strike (${haz.measuredValueCm >= 0 ? `+${haz.measuredValueCm}` : haz.measuredValueCm}cm)`;
       } else if (haz.hazardType === 'HIGH_REACH_CRUTCH_RELEASE') {
@@ -83,13 +130,13 @@ export const RoomCanvas3D: React.FC<RoomCanvas3DProps> = ({
       } else if (haz.hazardType === 'FLOOR_CLUTTER_STANCE_BLOCK') {
         shortBadge = `📏 Stance ${haz.measuredValueCm}cm < ${haz.requiredValueCm}cm`;
       } else if (haz.hazardType === 'PASSAGE_PINCH_COLLISION') {
-        shortBadge = `📐 Pinch ${haz.measuredValueCm}cm < ${haz.requiredValueCm}cm`;
+        shortBadge = `📐 Passage ${haz.measuredValueCm}cm < ${haz.requiredValueCm}cm`;
       } else if (haz.hazardType === 'THRESHOLD_TRIP_OR_BLOCK') {
         shortBadge = `⚡ Step Lip ${haz.measuredValueCm}cm`;
       } else if (haz.hazardType === 'TURNING_RADIUS_COLLISION') {
-        shortBadge = `🔄 Turn Ø ${haz.measuredValueCm}cm < ${haz.requiredValueCm}cm`;
+        shortBadge = `🔄 Turn Ø ${haz.measuredValueCm}cm`;
       } else if (haz.hazardType === 'WET_FLOOR_SLIP_AMPLIFIER') {
-        shortBadge = `💧 Wet Glazed Tile Slip`;
+        shortBadge = `💧 Wet Tile Slip Risk`;
       }
 
       items.push({
@@ -97,16 +144,15 @@ export const RoomCanvas3D: React.FC<RoomCanvas3DProps> = ({
         objectId: primaryObjId,
         position3D: new THREE.Vector3(
           haz.collisionPoint3D.x,
-          haz.collisionPoint3D.y + 0.14,
+          haz.collisionPoint3D.y + 0.12,
           haz.collisionPoint3D.z
         ),
         badgeText: shortBadge,
-        subText: `Req: ${haz.requiredValueCm}cm · Click to inspect`,
         tone: haz.severity === 'CRITICAL' ? 'critical' : 'warning',
       });
     });
 
-    // 2. Caregiver Locked (HITL) or User Tape-Measured objects
+    // 3. Caregiver Locked (HITL) or User Tape-Measured objects
     objects.forEach((obj) => {
       if (activeLayerFilter !== 'all' && activeLayerFilter !== obj.layer) return;
       const topY = obj.position.y + obj.dimensions.height / 2 + 0.1;
@@ -117,839 +163,514 @@ export const RoomCanvas3D: React.FC<RoomCanvas3DProps> = ({
           objectId: obj.id,
           position3D: new THREE.Vector3(obj.position.x, topY, obj.position.z),
           badgeText: `🔒 Locked: ${obj.name.split('(')[0].trim()}`,
-          subText: 'HITL Constraint Active',
           tone: 'locked',
         });
-        seenObjectIds.add(obj.id);
       } else if (obj.measurementStatus === 'user_measured') {
         items.push({
           id: `hud-meas-${obj.id}`,
           objectId: obj.id,
           position3D: new THREE.Vector3(obj.position.x, topY, obj.position.z),
-          badgeText: `📏 Measured: ${Math.round(obj.dimensions.width * 100)}×${Math.round(
+          badgeText: `📏 Tape: ${Math.round(obj.dimensions.width * 100)}×${Math.round(
             obj.dimensions.depth * 100
-          )}cm (Y=${Math.round(obj.position.y * 100)}cm)`,
-          subText: obj.name.split('(')[0].trim(),
+          )}cm`,
           tone: 'measured',
         });
-        seenObjectIds.add(obj.id);
       }
     });
 
-    // 3. In AFTER mode, show remediation callouts for moved/recessed/added safety items
+    // 4. AFTER mode key safety remediation badges
     if (remediationMode === 'AFTER') {
       objects.forEach((afterObj) => {
         if (activeLayerFilter !== 'all' && activeLayerFilter !== afterObj.layer) return;
         if (seenObjectIds.has(afterObj.id)) return;
-
         const beforeObj = beforeObjects.find((b) => b.id === afterObj.id);
-        const topY = afterObj.position.y + afterObj.dimensions.height / 2 + 0.1;
-
-        if (beforeObj) {
-          const dxCm = Math.round((afterObj.position.x - beforeObj.position.x) * 100);
-          const dzCm = Math.round((afterObj.position.z - beforeObj.position.z) * 100);
-          const dwCm = Math.round((afterObj.dimensions.width - beforeObj.dimensions.width) * 100);
-          const dhCm = Math.round((afterObj.dimensions.height - beforeObj.dimensions.height) * 100);
-
-          if (Math.hypot(dxCm, dzCm) >= 4) {
+        if (!beforeObj) {
+          items.push({
+            id: `hud-new-${afterObj.id}`,
+            objectId: afterObj.id,
+            position3D: new THREE.Vector3(
+              afterObj.position.x,
+              afterObj.position.y + afterObj.dimensions.height / 2 + 0.1,
+              afterObj.position.z
+            ),
+            badgeText: `✨ +${afterObj.name.split('(')[0].trim()}`,
+            tone: 'remediated',
+          });
+        } else {
+          const distCm = Math.round(
+            Math.hypot(
+              afterObj.position.x - beforeObj.position.x,
+              afterObj.position.y - beforeObj.position.y,
+              afterObj.position.z - beforeObj.position.z
+            ) * 100
+          );
+          const depthDiffCm = Math.round(
+            (beforeObj.dimensions.depth - afterObj.dimensions.depth) * 100
+          );
+          if (distCm >= 8 || depthDiffCm >= 4) {
             items.push({
-              id: `hud-shift-${afterObj.id}`,
+              id: `hud-move-${afterObj.id}`,
               objectId: afterObj.id,
-              position3D: new THREE.Vector3(afterObj.position.x, topY, afterObj.position.z),
-              badgeText: `↔ Relocated ${Math.round(Math.hypot(dxCm, dzCm))}cm`,
-              subText: afterObj.name.split('(')[0].trim(),
-              tone: 'remediated',
-            });
-          } else if (Math.abs(dwCm) >= 5 || afterObj.materialHazard === 'shatterproof_guarded') {
-            items.push({
-              id: `hud-guard-${afterObj.id}`,
-              objectId: afterObj.id,
-              position3D: new THREE.Vector3(afterObj.position.x, topY, afterObj.position.z),
-              badgeText: `🛡️ Recessed & Shatter-Guarded`,
-              subText: `Depth ${Math.round(afterObj.dimensions.width * 100)}cm · Safe Arc`,
-              tone: 'remediated',
-            });
-          } else if (afterObj.category === 'door_threshold' && Math.abs(dhCm) >= 1) {
-            items.push({
-              id: `hud-ramp-${afterObj.id}`,
-              objectId: afterObj.id,
-              position3D: new THREE.Vector3(afterObj.position.x, topY + 0.08, afterObj.position.z),
-              badgeText: `✅ Beveled Ramp (0.3cm)`,
-              subText: 'Zero-lip doorway transition',
+              position3D: new THREE.Vector3(
+                afterObj.position.x,
+                afterObj.position.y + afterObj.dimensions.height / 2 + 0.1,
+                afterObj.position.z
+              ),
+              badgeText:
+                depthDiffCm >= 4
+                  ? `🔧 Depth -${depthDiffCm}cm`
+                  : `🔧 Shifted ${distCm}cm`,
               tone: 'remediated',
             });
           }
-        } else if (afterObj.category === 'safety_addition' || afterObj.category === 'grab_bar') {
-          items.push({
-            id: `hud-add-${afterObj.id}`,
-            objectId: afterObj.id,
-            position3D: new THREE.Vector3(afterObj.position.x, topY, afterObj.position.z),
-            badgeText: `➕ Added: ${afterObj.name.split('(')[0].trim()}`,
-            subText: `Y=${Math.round(afterObj.position.y * 100)}cm · Welfare Spec`,
-            tone: 'remediated',
-          });
         }
       });
     }
 
-    return items.slice(0, 8);
-  }, [hazards, objects, beforeObjects, remediationMode, activeLayerFilter]);
+    // Cap at 4 pins maximum so the 3D scene stays crisp and uncluttered
+    return items.slice(0, 4);
+  }, [hazards, objects, beforeObjects, remediationMode, activeLayerFilter, selectedObjectId]);
 
-  // Apply camera presets when selected
+  // Apply camera presets
   useEffect(() => {
-    const orbit = orbitRef.current;
     if (cameraPreset === 'isometric') {
-      orbit.theta = -0.62;
-      orbit.phi = 1.05;
-      orbit.radius = Math.max(roomDimensions.width, roomDimensions.depth) * 1.48;
-      orbit.target.set(0, 0.92, 0);
+      orbitRef.current.theta = -0.58;
+      orbitRef.current.phi = 1.08;
+      orbitRef.current.radius = 3.45;
+      orbitRef.current.target.set(0, 0.92, 0);
     } else if (cameraPreset === 'head_strike') {
-      // Close-up on the overhead cabinet & sit-to-stand head trajectory (130-190cm layer)
-      orbit.theta = -0.95;
-      orbit.phi = 1.18;
-      orbit.radius = 2.15;
-      orbit.target.set(0.25, 1.38, -0.35);
+      orbitRef.current.theta = -1.22;
+      orbitRef.current.phi = 1.32;
+      orbitRef.current.radius = 2.45;
+      orbitRef.current.target.set(0.15, 1.32, -0.35);
     } else if (cameraPreset === 'floor_stance') {
-      // Low angle inspecting floor caddies, threshold, and crutch stance width
-      orbit.theta = -0.45;
-      orbit.phi = 1.32;
-      orbit.radius = 2.55;
-      orbit.target.set(0.0, 0.35, 0.15);
+      orbitRef.current.theta = -0.32;
+      orbitRef.current.phi = 0.88;
+      orbitRef.current.radius = 2.75;
+      orbitRef.current.target.set(0.0, 0.42, 0.1);
     } else if (cameraPreset === 'top_down') {
-      orbit.theta = 0.0;
-      orbit.phi = 0.18;
-      orbit.radius = 4.2;
-      orbit.target.set(0, 0.5, 0);
+      orbitRef.current.theta = 0;
+      orbitRef.current.phi = 0.18;
+      orbitRef.current.radius = 4.2;
+      orbitRef.current.target.set(0, 0.5, 0);
     }
-  }, [cameraPreset, roomDimensions.width, roomDimensions.depth]);
+  }, [cameraPreset]);
 
   useEffect(() => {
     const container = mountRef.current;
-    if (!container) return;
+    if (!container || viewMode === 'photo_ar') return;
 
-    const width = container.clientWidth || 800;
-    const height = container.clientHeight || 520;
+    const width = container.clientWidth || 640;
+    const height = container.clientHeight || 480;
 
+    // 1. Scene & Camera Setup
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#060d1f');
-    scene.fog = new THREE.FogExp2('#060d1f', 0.065);
+    const camera = new THREE.PerspectiveCamera(44, width / height, 0.1, 50);
 
-    const camera = new THREE.PerspectiveCamera(46, width / height, 0.1, 50);
+    const updateCameraFromOrbit = () => {
+      const { theta, phi, radius, target } = orbitRef.current;
+      const clampedPhi = Math.max(0.12, Math.min(Math.PI / 2 - 0.04, phi));
+      camera.position.x = target.x + radius * Math.sin(clampedPhi) * Math.sin(theta);
+      camera.position.y = target.y + radius * Math.cos(clampedPhi);
+      camera.position.z = target.z + radius * Math.sin(clampedPhi) * Math.cos(theta);
+      camera.lookAt(target);
+    };
+    updateCameraFromOrbit();
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.12;
+
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
-    // Lighting
-    const ambientLight = new THREE.AmbientLight('#cbd5e1', 0.85);
-    scene.add(ambientLight);
-
-    const dirLight = new THREE.DirectionalLight('#f8fafc', 1.25);
-    dirLight.position.set(2.5, 4.5, 3.2);
-    dirLight.castShadow = true;
-    scene.add(dirLight);
-
-    const rimLight = new THREE.PointLight(
-      remediationMode === 'BEFORE' ? '#ef4444' : '#10b981',
-      0.8,
-      6
-    );
-    rimLight.position.set(0.5, 1.9, -0.2);
-    scene.add(rimLight);
-
-    // Room Shell Group
+    // 2. Architectural Room Shell (Tiled Floor, Wainscoting Walls, Baseboards, Lighting)
     const roomGroup = new THREE.Group();
     scene.add(roomGroup);
+    buildArchitecturalRoomShell(scene, roomGroup, roomDimensions, remediationMode);
 
-    const { width: rw, height: rh, depth: rd } = roomDimensions;
-
-    // Floor Slab
-    const floorGeo = new THREE.PlaneGeometry(rw, rd);
-    const floorMat = new THREE.MeshStandardMaterial({
-      color: remediationMode === 'BEFORE' ? '#1e293b' : '#0f292a',
-      roughness: 0.75,
-      metalness: 0.1,
-      side: THREE.DoubleSide,
-    });
-    const floorMesh = new THREE.Mesh(floorGeo, floorMat);
-    floorMesh.rotation.x = -Math.PI / 2;
-    floorMesh.receiveShadow = true;
-    roomGroup.add(floorMesh);
-
-    // Subtle Metric Grid on Floor (10cm / 50cm grid visual)
-    const gridHelper = new THREE.GridHelper(
-      Math.max(rw, rd),
-      Math.round(Math.max(rw, rd) * 4),
-      '#38bdf8',
-      '#1e293b'
-    );
-    gridHelper.position.y = 0.003;
-    (gridHelper.material as THREE.Material).opacity = 0.35;
-    (gridHelper.material as THREE.Material).transparent = true;
-    roomGroup.add(gridHelper);
-
-    // Back Wall & Side Walls (Translucent architectural wireframe + tinted planes)
-    const wallMat = new THREE.MeshStandardMaterial({
-      color: '#1e293b',
-      transparent: true,
-      opacity: 0.28,
-      side: THREE.DoubleSide,
-    });
-
-    // Back wall (Z = -rd/2)
-    const backWall = new THREE.Mesh(new THREE.PlaneGeometry(rw, rh), wallMat);
-    backWall.position.set(0, rh / 2, -rd / 2);
-    roomGroup.add(backWall);
-
-    // Left wall (X = -rw/2)
-    const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(rd, rh), wallMat);
-    leftWall.rotation.y = Math.PI / 2;
-    leftWall.position.set(-rw / 2, rh / 2, 0);
-    roomGroup.add(leftWall);
-
-    // Right wall (X = +rw/2)
-    const rightWallMat = new THREE.MeshStandardMaterial({
-      color: '#334155',
-      transparent: true,
-      opacity: 0.36,
-      side: THREE.DoubleSide,
-    });
-    const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(rd, rh), rightWallMat);
-    rightWall.rotation.y = Math.PI / 2;
-    rightWall.position.set(rw / 2, rh / 2, 0);
-    roomGroup.add(rightWall);
-
-    // Room bounding box wireframe
-    const roomBoxGeo = new THREE.BoxGeometry(rw, rh, rd);
-    const roomEdges = new THREE.EdgesGeometry(roomBoxGeo);
-    const roomLines = new THREE.LineSegments(
-      roomEdges,
-      new THREE.LineBasicMaterial({ color: '#475569', transparent: true, opacity: 0.6 })
-    );
-    roomLines.position.set(0, rh / 2, 0);
-    roomGroup.add(roomLines);
-
-    // -------------------------------------------------------------------------
-    // 3 ELEVATION LAYER PLANES (Floor 0.30m, Mid 1.30m, Overhead 1.90m)
-    // -------------------------------------------------------------------------
+    // Optional 3-Layer Elevation Planes (only when toggled on)
     if (showLayerSlices) {
-      const layerSpecs: Array<{ y: number; color: string; layer: ElevationLayer }> = [
-        { y: 0.3, color: '#38bdf8', layer: 'floor' },
-        { y: 1.3, color: '#f59e0b', layer: 'mid' },
-        { y: 1.85, color: '#f43f5e', layer: 'overhead' },
+      const sliceLevels = [
+        { y: 0.3, color: '#f97316', layer: 'floor' as ElevationLayer },
+        { y: 1.3, color: '#38bdf8', layer: 'mid' as ElevationLayer },
+        { y: 1.46, color: '#e11d48', layer: 'overhead' as ElevationLayer },
       ];
-
-      layerSpecs.forEach((spec) => {
-        if (activeLayerFilter !== 'all' && activeLayerFilter !== spec.layer) return;
-        const sliceGeo = new THREE.PlaneGeometry(rw - 0.04, rd - 0.04);
-        const sliceEdges = new THREE.EdgesGeometry(sliceGeo);
-        const sliceLine = new THREE.LineSegments(
-          sliceEdges,
-          new THREE.LineDashedMaterial({
-            color: spec.color,
-            dashSize: 0.1,
-            gapSize: 0.06,
-            transparent: true,
-            opacity: activeLayerFilter === spec.layer ? 0.9 : 0.4,
-          })
-        );
-        sliceLine.computeLineDistances();
-        sliceLine.rotation.x = -Math.PI / 2;
-        sliceLine.position.set(0, spec.y, 0);
-        roomGroup.add(sliceLine);
+      sliceLevels.forEach((slice) => {
+        if (activeLayerFilter !== 'all' && activeLayerFilter !== slice.layer) return;
+        const planeGeo = new THREE.PlaneGeometry(roomDimensions.width, roomDimensions.depth);
+        const planeMat = new THREE.MeshBasicMaterial({
+          color: slice.color,
+          transparent: true,
+          opacity: 0.07,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        });
+        const plane = new THREE.Mesh(planeGeo, planeMat);
+        plane.rotation.x = -Math.PI / 2;
+        plane.position.y = slice.y;
+        scene.add(plane);
       });
     }
 
-    // -------------------------------------------------------------------------
-    // RENDER 3D SCENE OBJECTS (Fixtures, Floor Clutter, Overhead Glass Cabinet)
-    // -------------------------------------------------------------------------
-    const hazardObjectIds = new Set(hazards.flatMap((h) => h.objectIds));
-    const interactiveMeshes: Array<{ mesh: THREE.Object3D; objectId: string }> = [];
+    // 3. Multi-Part Architectural 3D Objects (Toilet, Glass Cabinet, Grab Bar, Sink, Basins, Ramp, Furniture)
+    const clickableMeshes: THREE.Object3D[] = [];
+    const hazardObjIds = new Set<string>();
+    hazards.forEach((h) => h.objectIds.forEach((id) => hazardObjIds.add(id)));
 
     objects.forEach((obj) => {
-      const isLayerMatch = activeLayerFilter === 'all' || obj.layer === activeLayerFilter;
-      const isHazardObj = hazardObjectIds.has(obj.id);
-      const isSelected = selectedObjectId === obj.id;
-      const isGlassHazard = obj.materialHazard === 'tempered_glass';
-      const isSafetyAddition =
-        obj.category === 'safety_addition' || obj.materialHazard === 'shatterproof_guarded';
+      const isLayerMatch = activeLayerFilter === 'all' || activeLayerFilter === obj.layer;
+      const isSelected = obj.id === selectedObjectId;
+      const isHazardObj = hazardObjIds.has(obj.id);
 
-      const geo = new THREE.BoxGeometry(
-        obj.dimensions.width,
-        obj.dimensions.height,
-        obj.dimensions.depth
-      );
-
-      let baseColor = obj.color || '#64748b';
-      if (isHazardObj && remediationMode === 'BEFORE') {
-        baseColor = isGlassHazard ? '#fb7185' : '#f97316';
-      } else if (isSafetyAddition && remediationMode === 'AFTER') {
-        baseColor = '#10b981';
-      }
-
-      const mat = new THREE.MeshPhysicalMaterial({
-        color: baseColor,
-        transparent: true,
-        opacity: !isLayerMatch
-          ? 0.15
-          : obj.category === 'wet_zone'
-          ? 0.45
-          : isGlassHazard
-          ? 0.72
-          : 0.88,
-        roughness: isGlassHazard ? 0.15 : 0.55,
-        metalness: obj.category === 'grab_bar' ? 0.7 : 0.1,
-        emissive: isSelected
-          ? '#38bdf8'
-          : isHazardObj && remediationMode === 'BEFORE'
-          ? '#991b1b'
-          : isSafetyAddition && remediationMode === 'AFTER'
-          ? '#065f46'
-          : '#000000',
-        emissiveIntensity: isSelected ? 0.45 : isHazardObj || isSafetyAddition ? 0.35 : 0,
+      const { group, hitMesh } = createArchitecturalObjectGroup(obj, {
+        isLayerMatch,
+        isHazardObj,
+        isSelected,
+        remediationMode,
       });
+      scene.add(group);
 
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(obj.position.x, obj.position.y, obj.position.z);
-      mesh.castShadow = obj.category !== 'wet_zone';
-      mesh.receiveShadow = true;
-      roomGroup.add(mesh);
+      hitMesh.userData = { objectId: obj.id };
+      clickableMeshes.push(hitMesh);
 
-      interactiveMeshes.push({ mesh, objectId: obj.id });
-
-      // Crisp Bounding Box Edges
-      const edgesGeo = new THREE.EdgesGeometry(geo);
-      const edgeColor = isSelected
-        ? '#38bdf8'
-        : obj.lockedByUser
-        ? '#eab308'
-        : isHazardObj && remediationMode === 'BEFORE'
-        ? '#ef4444'
-        : isSafetyAddition
-        ? '#34d399'
-        : obj.measurementStatus === 'user_measured'
-        ? '#10b981'
-        : obj.measurementStatus === 'visual_estimate'
-        ? '#fbbf24'
-        : '#94a3b8';
-
-      const edgeMat = new THREE.LineBasicMaterial({
-        color: edgeColor,
-        transparent: true,
-        opacity: isLayerMatch ? 0.95 : 0.25,
+      group.traverse((child: THREE.Object3D) => {
+        if ((child as THREE.Mesh).isMesh) {
+          child.userData = { objectId: obj.id };
+          clickableMeshes.push(child);
+        }
       });
-      const wireframe = new THREE.LineSegments(edgesGeo, edgeMat);
-      mesh.add(wireframe);
-
-      // If this is the overhead glass cabinet in BEFORE mode, add a downward red danger projection zone
-      if (obj.category === 'overhead_cabinet' && remediationMode === 'BEFORE' && isHazardObj) {
-        const dangerZoneHeight = obj.position.y - obj.dimensions.height / 2;
-        const dangerGeo = new THREE.BoxGeometry(
-          obj.dimensions.width,
-          dangerZoneHeight,
-          obj.dimensions.depth
-        );
-        const dangerMat = new THREE.MeshBasicMaterial({
-          color: '#ef4444',
-          transparent: true,
-          opacity: 0.12,
-          depthWrite: false,
-        });
-        const dangerMesh = new THREE.Mesh(dangerGeo, dangerMat);
-        dangerMesh.position.set(
-          obj.position.x,
-          dangerZoneHeight / 2,
-          obj.position.z
-        );
-        roomGroup.add(dangerMesh);
-      }
     });
 
-    // -------------------------------------------------------------------------
-    // P1-3: RENDER 3D DISPLACEMENT VECTORS & GHOST WIREFRAMES IN 'AFTER' MODE
-    // -------------------------------------------------------------------------
+    // 4. Subtle AFTER Mode Displacement Vectors (Ghost Outline + Shift Arrow)
     if (remediationMode === 'AFTER' && beforeObjects.length > 0) {
-      beforeObjects.forEach((beforeObj) => {
-        if (activeLayerFilter !== 'all' && activeLayerFilter !== beforeObj.layer) return;
-        const afterObj = objects.find((o) => o.id === beforeObj.id);
+      objects.forEach((afterObj) => {
+        const beforeObj = beforeObjects.find((b) => b.id === afterObj.id);
+        if (!beforeObj) return;
 
-        if (afterObj) {
-          const fromVec = new THREE.Vector3(
-            beforeObj.position.x,
-            beforeObj.position.y,
-            beforeObj.position.z
-          );
-          const toVec = new THREE.Vector3(
-            afterObj.position.x,
-            afterObj.position.y,
-            afterObj.position.z
-          );
-          const dist = fromVec.distanceTo(toVec);
-          const widthDelta = Math.abs(afterObj.dimensions.width - beforeObj.dimensions.width);
+        const startVec = new THREE.Vector3(
+          beforeObj.position.x,
+          beforeObj.position.y,
+          beforeObj.position.z
+        );
+        const endVec = new THREE.Vector3(
+          afterObj.position.x,
+          afterObj.position.y,
+          afterObj.position.z
+        );
+        const dist = startVec.distanceTo(endVec);
+        const depthChanged =
+          Math.abs(beforeObj.dimensions.depth - afterObj.dimensions.depth) > 0.04;
 
-          if (dist > 0.04 || widthDelta > 0.05) {
-            // 1. Ghost dashed wireframe at original BEFORE coordinates
-            const ghostGeo = new THREE.BoxGeometry(
-              beforeObj.dimensions.width,
-              beforeObj.dimensions.height,
-              beforeObj.dimensions.depth
-            );
-            const ghostEdges = new THREE.EdgesGeometry(ghostGeo);
-            const ghostLine = new THREE.LineSegments(
-              ghostEdges,
-              new THREE.LineDashedMaterial({
-                color: '#f43f5e',
-                dashSize: 0.05,
-                gapSize: 0.04,
-                transparent: true,
-                opacity: 0.55,
-              })
-            );
-            ghostLine.computeLineDistances();
-            ghostLine.position.copy(fromVec);
-            roomGroup.add(ghostLine);
-
-            // 2. 3D ArrowHelper showing displacement vector from BEFORE -> AFTER
-            if (dist > 0.04) {
-              const dir = toVec.clone().sub(fromVec).normalize();
-              const arrow = new THREE.ArrowHelper(
-                dir,
-                fromVec,
-                dist,
-                0x34d399,
-                Math.min(0.12, dist * 0.45),
-                0.07
-              );
-              roomGroup.add(arrow);
-            }
-          }
-        } else if (beforeObj.category === 'floor_clutter') {
-          // Removed floor clutter footprint (dashed rose outline on floor showing cleared zone)
+        if (dist > 0.08 || depthChanged) {
           const ghostGeo = new THREE.BoxGeometry(
             beforeObj.dimensions.width,
-            0.02,
+            beforeObj.dimensions.height,
             beforeObj.dimensions.depth
           );
           const ghostEdges = new THREE.EdgesGeometry(ghostGeo);
           const ghostLine = new THREE.LineSegments(
             ghostEdges,
-            new THREE.LineDashedMaterial({
-              color: '#34d399',
-              dashSize: 0.04,
-              gapSize: 0.03,
+            new THREE.LineBasicMaterial({
+              color: '#94a3b8',
               transparent: true,
-              opacity: 0.5,
+              opacity: 0.28,
             })
           );
-          ghostLine.computeLineDistances();
-          ghostLine.position.set(beforeObj.position.x, 0.015, beforeObj.position.z);
-          roomGroup.add(ghostLine);
+          ghostLine.position.copy(startVec);
+          scene.add(ghostLine);
+
+          if (dist > 0.08) {
+            const dir = endVec.clone().sub(startVec).normalize();
+            const arrowHelper = new THREE.ArrowHelper(
+              dir,
+              startVec,
+              dist,
+              0x34d399,
+              Math.min(0.14, dist * 0.35),
+              0.08
+            );
+            scene.add(arrowHelper);
+          }
         }
       });
     }
 
-    // -------------------------------------------------------------------------
-    // RENDER TRAJECTORY PATH & HEAD-STRIKE ARC
-    // -------------------------------------------------------------------------
-    if (waypoints.length >= 2) {
-      // Floor path curve
-      const floorPoints = waypoints.map((wp) => new THREE.Vector3(wp.x, 0.03, wp.z));
-      const floorCurve = new THREE.CatmullRomCurve3(floorPoints);
-      const floorTubeGeo = new THREE.TubeGeometry(floorCurve, 40, 0.022, 8, false);
-      const floorTubeMat = new THREE.MeshBasicMaterial({
-        color: remediationMode === 'BEFORE' ? '#f97316' : '#10b981',
-        transparent: true,
-        opacity: 0.85,
-      });
-      roomGroup.add(new THREE.Mesh(floorTubeGeo, floorTubeMat));
+    // 5. Floor Trajectory Ribbon & Sit-to-Stand Head Arc
+    if (waypoints.length > 0) {
+      const floorPoints = waypoints.map((wp) => new THREE.Vector3(wp.x, 0.025, wp.z));
+      if (floorPoints.length >= 2) {
+        const floorCurve = new THREE.CatmullRomCurve3(floorPoints);
+        const tubeGeo = new THREE.TubeGeometry(floorCurve, 48, 0.024, 8, false);
+        const tubeMat = new THREE.MeshStandardMaterial({
+          color: remediationMode === 'AFTER' ? '#10b981' : '#38bdf8',
+          emissive: remediationMode === 'AFTER' ? '#059669' : '#0284c7',
+          emissiveIntensity: 0.45,
+          roughness: 0.3,
+        });
+        const floorTube = new THREE.Mesh(tubeGeo, tubeMat);
+        scene.add(floorTube);
+      }
 
-      // 3D Head-Arc Trajectory Curve (showing how head height + forward pitch travels in 3D space!)
-      const userScale = profile.userHeightCm / 168;
+      // Head trajectory arc (smoothly traces sit-to-stand forward pitch)
       const headPoints = waypoints.map((wp) => {
         const rad = (wp.facingAngleDeg * Math.PI) / 180;
-        const pitchScale = profile.sitToStandForwardPitchCm / 28;
-        const hx = wp.x + Math.sin(rad) * wp.headForwardOffsetM * pitchScale;
-        const hz = wp.z - Math.cos(rad) * wp.headForwardOffsetM * pitchScale;
-        const hy = wp.headHeightM * userScale;
-        return new THREE.Vector3(hx, hy, hz);
+        const forwardShift =
+          remediationMode === 'AFTER' && wp.posture === 'sit_to_stand_lean'
+            ? wp.headForwardOffsetM * 0.45
+            : wp.headForwardOffsetM;
+        const headX = wp.x + Math.sin(rad) * forwardShift;
+        const headZ = wp.z - Math.cos(rad) * forwardShift;
+        return new THREE.Vector3(headX, wp.headHeightM, headZ);
       });
+      if (headPoints.length >= 2) {
+        const headCurve = new THREE.CatmullRomCurve3(headPoints);
+        const headTubeGeo = new THREE.TubeGeometry(headCurve, 48, 0.014, 8, false);
+        const hasOverheadCollision = hazards.some((h) => h.layer === 'overhead');
+        const headTubeMat = new THREE.MeshStandardMaterial({
+          color: hasOverheadCollision ? '#f43f5e' : '#34d399',
+          emissive: hasOverheadCollision ? '#e11d48' : '#059669',
+          emissiveIntensity: 0.65,
+        });
+        const headTube = new THREE.Mesh(headTubeGeo, headTubeMat);
+        scene.add(headTube);
+      }
 
-      const headCurve = new THREE.CatmullRomCurve3(headPoints);
-      const headTubeGeo = new THREE.TubeGeometry(headCurve, 48, 0.018, 8, false);
-      const headTubeMat = new THREE.MeshBasicMaterial({
-        color: remediationMode === 'BEFORE' ? '#f43f5e' : '#38bdf8',
-        transparent: true,
-        opacity: 0.9,
-      });
-      roomGroup.add(new THREE.Mesh(headTubeGeo, headTubeMat));
-
-      // Waypoint markers on floor
+      // Clean floor step markers
       waypoints.forEach((wp, idx) => {
-        const isCurrent = idx === activeWaypointIndex;
+        const isActive = idx === activeWaypointIndex;
         const ringGeo = new THREE.RingGeometry(
-          isCurrent ? 0.11 : 0.06,
-          isCurrent ? 0.16 : 0.09,
-          24
+          isActive ? 0.11 : 0.06,
+          isActive ? 0.15 : 0.09,
+          32
         );
         const ringMat = new THREE.MeshBasicMaterial({
-          color: isCurrent ? '#38bdf8' : '#94a3b8',
+          color: isActive
+            ? remediationMode === 'AFTER'
+              ? '#10b981'
+              : '#38bdf8'
+            : '#64748b',
           side: THREE.DoubleSide,
         });
-        const ring = new THREE.Mesh(ringGeo, ringMat);
-        ring.rotation.x = -Math.PI / 2;
-        ring.position.set(wp.x, 0.02, wp.z);
-        roomGroup.add(ring);
+        const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+        ringMesh.rotation.x = -Math.PI / 2;
+        ringMesh.position.set(wp.x, 0.028, wp.z);
+        scene.add(ringMesh);
       });
     }
 
-    // -------------------------------------------------------------------------
-    // RENDER ARTICULATED 3D HUMAN AVATAR (Crutches vs. Manual Wheelchair)
-    // -------------------------------------------------------------------------
-    const activeWp =
-      waypoints[Math.min(activeWaypointIndex, waypoints.length - 1)] || waypoints[0];
-
-    const avatarGroup = new THREE.Group();
+    // 6. Articulated 3D Human Mannequin & Mobility Aid at Active Waypoint
+    const activeWp = waypoints[activeWaypointIndex] || waypoints[0];
+    const hasHeadHazard = hazards.some((h) => h.hazardType === 'OVERHEAD_GLASS_HEAD_STRIKE');
     if (activeWp) {
-      const userScale = profile.userHeightCm / 168;
-      const rad = (activeWp.facingAngleDeg * Math.PI) / 180;
-      const pitchRad = (activeWp.torsoForwardPitchDeg * Math.PI) / 180;
-      const pitchScale = profile.sitToStandForwardPitchCm / 28;
-
-      avatarGroup.position.set(activeWp.x, 0, activeWp.z);
-      avatarGroup.rotation.y = -rad;
-
-      const bodyColor = remediationMode === 'BEFORE' ? '#38bdf8' : '#34d399';
-      const bodyMat = new THREE.MeshStandardMaterial({
-        color: bodyColor,
-        roughness: 0.35,
-        metalness: 0.15,
-      });
-
-      if (profile.id === 'wheelchair') {
-        // Manual Wheelchair + Seated User
-        const wheelRadius = 0.3;
-        const wheelGeo = new THREE.CylinderGeometry(wheelRadius, wheelRadius, 0.04, 24);
-        const wheelMat = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.6 });
-        const rimGeo = new THREE.TorusGeometry(wheelRadius - 0.02, 0.015, 12, 28);
-        const rimMat = new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.8 });
-
-        [-0.32, 0.32].forEach((sideX) => {
-          const wheel = new THREE.Mesh(wheelGeo, wheelMat);
-          wheel.rotation.z = Math.PI / 2;
-          wheel.position.set(sideX, wheelRadius, 0);
-          avatarGroup.add(wheel);
-
-          const rim = new THREE.Mesh(rimGeo, rimMat);
-          rim.rotation.y = Math.PI / 2;
-          rim.position.set(sideX + (sideX > 0 ? 0.025 : -0.025), wheelRadius, 0);
-          avatarGroup.add(rim);
-        });
-
-        // Seat & Backrest
-        const seat = new THREE.Mesh(
-          new THREE.BoxGeometry(0.54, 0.06, 0.48),
-          new THREE.MeshStandardMaterial({ color: '#334155' })
-        );
-        seat.position.set(0, 0.48, 0);
-        avatarGroup.add(seat);
-
-        // Seated Torso & Head
-        const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.14, 0.52, 16), bodyMat);
-        torso.position.set(0, 0.78, -0.04);
-        avatarGroup.add(torso);
-
-        const head = new THREE.Mesh(
-          new THREE.SphereGeometry(0.125, 24, 24),
-          new THREE.MeshStandardMaterial({ color: '#f8fafc', emissive: bodyColor, emissiveIntensity: 0.25 })
-        );
-        head.position.set(0, 1.18, -0.06);
-        avatarGroup.add(head);
-
-        // Turning Circle Ring on Floor
-        const turnRadiusM = profile.turningRadiusCm / 200;
-        const turnRing = new THREE.Mesh(
-          new THREE.RingGeometry(turnRadiusM - 0.02, turnRadiusM, 48),
-          new THREE.MeshBasicMaterial({
-            color: remediationMode === 'BEFORE' ? '#ef4444' : '#10b981',
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.45,
-          })
-        );
-        turnRing.rotation.x = -Math.PI / 2;
-        turnRing.position.y = 0.015;
-        avatarGroup.add(turnRing);
-      } else {
-        // Articulated Crutch User
-        const isSittingOrRising =
-          activeWp.posture === 'sitting' || activeWp.posture === 'sit_to_stand_lean';
-        const hipHeight = (isSittingOrRising ? 0.72 : 0.88) * userScale;
-
-        // Legs
-        const legGeo = new THREE.CylinderGeometry(0.055, 0.045, hipHeight, 12);
-        [-0.12, 0.12].forEach((lx) => {
-          const leg = new THREE.Mesh(legGeo, bodyMat);
-          leg.position.set(lx, hipHeight / 2, 0);
-          avatarGroup.add(leg);
-        });
-
-        // Upper body pivot group at hips
-        const upperBodyPivot = new THREE.Group();
-        upperBodyPivot.position.set(0, hipHeight, 0);
-        upperBodyPivot.rotation.x = -pitchRad * pitchScale;
-
-        const torsoLen = 0.52 * userScale;
-        const torsoMesh = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.15, 0.12, torsoLen, 16),
-          bodyMat
-        );
-        torsoMesh.position.set(0, torsoLen / 2, 0);
-        upperBodyPivot.add(torsoMesh);
-
-        // Head Sphere
-        const hasOverheadHazardHere = hazards.some(
-          (h) => h.layer === 'overhead' && h.waypointId === activeWp.id
-        );
-        const headMat = new THREE.MeshStandardMaterial({
-          color: hasOverheadHazardHere && remediationMode === 'BEFORE' ? '#ef4444' : '#f8fafc',
-          emissive: hasOverheadHazardHere && remediationMode === 'BEFORE' ? '#dc2626' : bodyColor,
-          emissiveIntensity: hasOverheadHazardHere && remediationMode === 'BEFORE' ? 0.75 : 0.25,
-          roughness: 0.2,
-        });
-        const headMesh = new THREE.Mesh(new THREE.SphereGeometry(0.125, 24, 24), headMat);
-        headMesh.position.set(0, torsoLen + 0.16 * userScale, 0);
-        upperBodyPivot.add(headMesh);
-
-        // Head safety envelope wireframe sphere
-        const headEnvelope = new THREE.Mesh(
-          new THREE.SphereGeometry(0.18, 16, 16),
-          new THREE.MeshBasicMaterial({
-            color: hasOverheadHazardHere && remediationMode === 'BEFORE' ? '#ef4444' : '#38bdf8',
-            wireframe: true,
-            transparent: true,
-            opacity: 0.45,
-          })
-        );
-        headEnvelope.position.copy(headMesh.position);
-        upperBodyPivot.add(headEnvelope);
-
-        avatarGroup.add(upperBodyPivot);
-
-        // Bilateral Axillary / Forearm Crutches
-        const stanceHalfWidthM = (profile.minPassageWidthCm / 100) * 0.46;
-        const crutchMat = new THREE.MeshStandardMaterial({
-          color: '#fbbf24',
-          metalness: 0.6,
-          roughness: 0.3,
-        });
-        const crutchLen = 1.18 * userScale;
-        const crutchGeo = new THREE.CylinderGeometry(0.018, 0.014, crutchLen, 10);
-
-        [-stanceHalfWidthM, stanceHalfWidthM].forEach((cx, idx) => {
-          const crutch = new THREE.Mesh(crutchGeo, crutchMat);
-          if (activeWp.posture === 'overhead_reach' && idx === 1 && remediationMode === 'BEFORE') {
-            crutch.position.set(cx * 0.85, crutchLen * 0.68, -0.18);
-            crutch.rotation.z = -0.35;
-            crutch.rotation.x = -0.45;
-          } else {
-            crutch.position.set(cx, crutchLen / 2, -0.08);
-            crutch.rotation.z = cx > 0 ? 0.14 : -0.14;
-            crutch.rotation.x = -0.1;
-          }
-          avatarGroup.add(crutch);
-        });
-
-        // Floor Stance Width Indicator Bar under Crutch Tips
-        const stanceBarGeo = new THREE.BoxGeometry(stanceHalfWidthM * 2.1, 0.015, 0.08);
-        const stanceBarMat = new THREE.MeshBasicMaterial({
-          color: remediationMode === 'BEFORE' ? '#f59e0b' : '#10b981',
-          transparent: true,
-          opacity: 0.7,
-        });
-        const stanceBar = new THREE.Mesh(stanceBarGeo, stanceBarMat);
-        stanceBar.position.set(0, 0.01, -0.08);
-        avatarGroup.add(stanceBar);
-      }
-
+      const avatarGroup = createArticulatedHumanAvatar(
+        activeWp,
+        profile,
+        remediationMode,
+        hasHeadHazard
+      );
       scene.add(avatarGroup);
     }
 
-    // -------------------------------------------------------------------------
-    // RENDER 3D COLLISION HAZARD SPHERES & PULSING RINGS
-    // -------------------------------------------------------------------------
-    const pulsingRings: THREE.Mesh[] = [];
+    // 7. Clean Subtle Hazard Pulse Rings (Replaces giant cluttered wireframe spheres)
+    const hazardRingMeshes: THREE.Mesh[] = [];
     hazards.forEach((haz) => {
       if (activeLayerFilter !== 'all' && activeLayerFilter !== haz.layer) return;
 
-      const { x, y, z } = haz.collisionPoint3D;
-      const isCrit = haz.severity === 'CRITICAL';
-      const color = isCrit ? '#ef4444' : '#f59e0b';
-
-      const sphereGeo = new THREE.SphereGeometry(isCrit ? 0.085 : 0.065, 20, 20);
-      const sphereMat = new THREE.MeshBasicMaterial({
-        color,
+      const ringGeo = new THREE.RingGeometry(0.08, 0.13, 32);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: haz.severity === 'CRITICAL' ? '#f43f5e' : '#f59e0b',
+        side: THREE.DoubleSide,
         transparent: true,
         opacity: 0.9,
       });
-      const sphere = new THREE.Mesh(sphereGeo, sphereMat);
-      sphere.position.set(x, y, z);
-      scene.add(sphere);
-
-      const outerGeo = new THREE.SphereGeometry(0.16, 16, 16);
-      const outerMat = new THREE.MeshBasicMaterial({
-        color,
-        wireframe: true,
-        transparent: true,
-        opacity: 0.65,
-      });
-      const outerSphere = new THREE.Mesh(outerGeo, outerMat);
-      outerSphere.position.set(x, y, z);
-      scene.add(outerSphere);
-      pulsingRings.push(outerSphere);
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.position.set(
+        haz.collisionPoint3D.x,
+        Math.max(0.03, haz.collisionPoint3D.y),
+        haz.collisionPoint3D.z
+      );
+      if (haz.layer === 'floor') {
+        ring.rotation.x = -Math.PI / 2;
+      } else {
+        ring.lookAt(camera.position);
+      }
+      scene.add(ring);
+      hazardRingMeshes.push(ring);
     });
 
-    // -------------------------------------------------------------------------
-    // INTERACTIVE POINTER ORBIT + CLICK SELECTION
-    // -------------------------------------------------------------------------
+    // 8. Mouse Orbit, Wheel Zoom & Click Raycasting
     const raycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
+    const mouse = new THREE.Vector2();
     let pointerDownPos = { x: 0, y: 0 };
 
-    const onPointerDown = (e: MouseEvent) => {
+    const handlePointerDown = (event: MouseEvent) => {
       orbitRef.current.isDragging = true;
-      orbitRef.current.lastX = e.clientX;
-      orbitRef.current.lastY = e.clientY;
-      pointerDownPos = { x: e.clientX, y: e.clientY };
+      orbitRef.current.lastX = event.clientX;
+      orbitRef.current.lastY = event.clientY;
+      pointerDownPos = { x: event.clientX, y: event.clientY };
     };
 
-    const onPointerMove = (e: MouseEvent) => {
+    const handlePointerMove = (event: MouseEvent) => {
       if (!orbitRef.current.isDragging) return;
-      const dx = e.clientX - orbitRef.current.lastX;
-      const dy = e.clientY - orbitRef.current.lastY;
-      orbitRef.current.lastX = e.clientX;
-      orbitRef.current.lastY = e.clientY;
+      const dx = event.clientX - orbitRef.current.lastX;
+      const dy = event.clientY - orbitRef.current.lastY;
+      orbitRef.current.lastX = event.clientX;
+      orbitRef.current.lastY = event.clientY;
 
       orbitRef.current.theta -= dx * 0.0075;
       orbitRef.current.phi = Math.max(
         0.15,
-        Math.min(Math.PI / 2 - 0.04, orbitRef.current.phi - dy * 0.0065)
+        Math.min(Math.PI / 2 - 0.04, orbitRef.current.phi - dy * 0.0075)
       );
+      updateCameraFromOrbit();
     };
 
-    const onPointerUp = (e: MouseEvent) => {
+    const handlePointerUp = (event: MouseEvent) => {
       orbitRef.current.isDragging = false;
-      const moveDist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+      const moveDist = Math.hypot(
+        event.clientX - pointerDownPos.x,
+        event.clientY - pointerDownPos.y
+      );
       if (moveDist < 5) {
         const rect = renderer.domElement.getBoundingClientRect();
-        pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-        pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-        raycaster.setFromCamera(pointer, camera);
-
-        const targets = interactiveMeshes.map((m) => m.mesh);
-        const hits = raycaster.intersectObjects(targets, false);
-        if (hits.length > 0) {
-          const hitMesh = hits[0].object;
-          const found = interactiveMeshes.find((m) => m.mesh === hitMesh);
-          if (found) {
-            onSelectObject(found.objectId === selectedObjectId ? null : found.objectId);
-          }
+        mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(clickableMeshes, false);
+        if (intersects.length > 0) {
+          const hitId = intersects[0].object.userData?.objectId;
+          if (hitId) onSelectObject(hitId);
         }
       }
     };
 
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
       orbitRef.current.radius = Math.max(
-        1.5,
-        Math.min(6.5, orbitRef.current.radius + e.deltaY * 0.0025)
+        1.7,
+        Math.min(6.2, orbitRef.current.radius + event.deltaY * 0.0025)
       );
+      updateCameraFromOrbit();
     };
 
     const domElem = renderer.domElement;
-    domElem.addEventListener('mousedown', onPointerDown);
-    window.addEventListener('mousemove', onPointerMove);
-    window.addEventListener('mouseup', onPointerUp);
-    domElem.addEventListener('wheel', onWheel, { passive: false });
+    domElem.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mouseup', handlePointerUp);
+    domElem.addEventListener('wheel', handleWheel, { passive: false });
 
-    // Animation Loop + 3D-to-2D HUD Projection
-    let animId = 0;
+    // 9. Animation Loop with 2D Screen-Space HUD Pin Collision Avoidance
+    let frameId = 0;
     let clock = 0;
-    const tempProjVec = new THREE.Vector3();
+    const projVec = new THREE.Vector3();
 
     const animate = () => {
-      animId = requestAnimationFrame(animate);
-      clock += 0.045;
+      frameId = requestAnimationFrame(animate);
+      clock += 0.05;
 
-      // Update camera position from spherical coordinates
-      const { theta, phi, radius, target } = orbitRef.current;
-      camera.position.x = target.x + radius * Math.sin(phi) * Math.sin(theta);
-      camera.position.y = target.y + radius * Math.cos(phi);
-      camera.position.z = target.z + radius * Math.sin(phi) * Math.cos(theta);
-      camera.lookAt(target);
-      camera.updateMatrixWorld();
-
-      // Pulse collision spheres
-      const scale = 1 + Math.sin(clock * 2.2) * 0.25;
-      pulsingRings.forEach((ring) => {
-        ring.scale.set(scale, scale, scale);
+      // Pulse hazard rings cleanly
+      hazardRingMeshes.forEach((ring, i) => {
+        const s = 1 + Math.sin(clock * 2.2 + i) * 0.16;
+        ring.scale.set(s, s, s);
       });
 
-      // Update 3D-to-2D projected floating HUD callouts
-      if (showHudCallouts) {
-        const cw = container.clientWidth || width;
-        const ch = container.clientHeight || height;
-        hudCallouts.forEach((callout) => {
-          const el = hudItemRefs.current[callout.id];
+      renderer.render(scene, camera);
+
+      // Project 3D HUD pins to 2D and apply vertical separation so pins NEVER overlap
+      if (showHudCallouts && hudCallouts.length > 0) {
+        const cWidth = container.clientWidth || width;
+        const cHeight = container.clientHeight || height;
+
+        interface ProjectedPin {
+          id: string;
+          el: HTMLButtonElement;
+          x: number;
+          y: number;
+          visible: boolean;
+        }
+        const projected: ProjectedPin[] = [];
+
+        hudCallouts.forEach((item) => {
+          const el = hudItemRefs.current[item.id];
           if (!el) return;
-          tempProjVec.copy(callout.position3D).project(camera);
-          // Check if inside camera frustum
-          if (tempProjVec.z > 1 || tempProjVec.z < -1) {
-            el.style.opacity = '0';
-            el.style.pointerEvents = 'none';
-            return;
+          projVec.copy(item.position3D).project(camera);
+          if (projVec.z > 1) {
+            projected.push({ id: item.id, el, x: 0, y: 0, visible: false });
+          } else {
+            const rawX = (projVec.x * 0.5 + 0.5) * cWidth;
+            const rawY = (-projVec.y * 0.5 + 0.5) * cHeight;
+            const clampedX = Math.max(95, Math.min(cWidth - 95, rawX));
+            const clampedY = Math.max(54, Math.min(cHeight - 48, rawY));
+            projected.push({
+              id: item.id,
+              el,
+              x: clampedX,
+              y: clampedY,
+              visible: true,
+            });
           }
-          const screenX = (tempProjVec.x * 0.5 + 0.5) * cw;
-          const screenY = (-tempProjVec.y * 0.5 + 0.5) * ch;
-          if (screenX < 25 || screenX > cw - 25 || screenY < 45 || screenY > ch - 55) {
-            el.style.opacity = '0';
-            el.style.pointerEvents = 'none';
-            return;
+        });
+
+        // Sort visible pins top-to-bottom and push overlapping pins apart vertically
+        const visiblePins = projected.filter((p) => p.visible).sort((a, b) => a.y - b.y);
+        const minVerticalGap = 32;
+        const minHorizontalGap = 165;
+
+        for (let i = 1; i < visiblePins.length; i++) {
+          for (let j = 0; j < i; j++) {
+            const upper = visiblePins[j];
+            const lower = visiblePins[i];
+            if (Math.abs(lower.x - upper.x) < minHorizontalGap) {
+              const dy = lower.y - upper.y;
+              if (dy < minVerticalGap) {
+                lower.y = Math.min(cHeight - 36, upper.y + minVerticalGap);
+              }
+            }
           }
-          el.style.opacity = '1';
-          el.style.pointerEvents = 'auto';
-          el.style.transform = `translate3d(${Math.round(screenX)}px, ${Math.round(screenY)}px, 0) translate(-50%, -100%)`;
+        }
+
+        projected.forEach((p) => {
+          if (!p.visible) {
+            p.el.style.opacity = '0';
+            p.el.style.pointerEvents = 'none';
+          } else {
+            p.el.style.opacity = '1';
+            p.el.style.pointerEvents = 'auto';
+            p.el.style.transform = `translate(-50%, -100%) translate(${Math.round(
+              p.x
+            )}px, ${Math.round(p.y)}px)`;
+          }
         });
       }
-
-      renderer.render(scene, camera);
     };
     animate();
 
-    // Handle Resize
     const handleResize = () => {
       if (!container) return;
-      const w = container.clientWidth || 800;
-      const h = container.clientHeight || 520;
-      camera.aspect = w / h;
+      const newW = container.clientWidth || 640;
+      const newH = container.clientHeight || 480;
+      camera.aspect = newW / newH;
       camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
+      renderer.setSize(newW, newH);
     };
     window.addEventListener('resize', handleResize);
 
     return () => {
-      cancelAnimationFrame(animId);
-      domElem.removeEventListener('mousedown', onPointerDown);
-      window.removeEventListener('mousemove', onPointerMove);
-      window.removeEventListener('mouseup', onPointerUp);
-      domElem.removeEventListener('wheel', onWheel);
+      cancelAnimationFrame(frameId);
+      domElem.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerUp);
+      domElem.removeEventListener('wheel', handleWheel);
       window.removeEventListener('resize', handleResize);
       renderer.dispose();
     };
   }, [
+    viewMode,
     roomDimensions,
     objects,
     beforeObjects,
@@ -960,225 +681,308 @@ export const RoomCanvas3D: React.FC<RoomCanvas3DProps> = ({
     remediationMode,
     activeLayerFilter,
     selectedObjectId,
+    cameraPreset,
     showLayerSlices,
     showHudCallouts,
-    hudCallouts,
   ]);
 
-  const activeWaypoint =
-    waypoints[Math.min(activeWaypointIndex, waypoints.length - 1)] || waypoints[0];
-  const selectedObj = objects.find((o) => o.id === selectedObjectId);
+  const activeWp = waypoints[activeWaypointIndex] || waypoints[0];
 
   return (
-    <div className="relative w-full h-[500px] lg:h-[560px] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl select-none">
-      {/* Three.js Canvas Mount */}
-      <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+    <div className="rounded-3xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl">
+      {/* =====================================================================
+          CLEAN NON-OVERLAPPING STUDIO HEADER BAR (Outside Canvas)
+      ===================================================================== */}
+      <div className="bg-slate-900/95 border-b border-slate-800 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
+        {/* Left: View Mode Switcher (Split Photo AR + 3D Twin / Photo AR Only / 3D Twin Only) */}
+        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+          <HoverTooltip
+            title="Split View: Real Photo AR + 3D Digital Twin"
+            description="Displays the 2D augmented-reality photo overlay side-by-side with the interactive 3D architectural digital twin for simultaneous visual and spatial verification."
+            badge="Default View"
+            align="left"
+          >
+            <button
+              onClick={() => setViewMode('split')}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition ${
+                viewMode === 'split'
+                  ? 'bg-sky-500 text-slate-950 shadow-sm'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <Columns className="w-3.5 h-3.5" />
+              <span>Split: Photo AR + 3D Twin</span>
+            </button>
+          </HoverTooltip>
 
-      {/* P1-3: Real-Time 3D-to-2D Projected Floating HUD Callouts */}
-      {showHudCallouts && (
-        <div className="absolute inset-0 pointer-events-none overflow-hidden z-10">
-          {hudCallouts.map((callout) => {
-            const isSelected = callout.objectId && selectedObjectId === callout.objectId;
-            const toneStyle =
-              callout.tone === 'critical'
-                ? 'bg-rose-950/90 border-rose-500/80 text-rose-100 shadow-rose-950/60'
-                : callout.tone === 'warning'
-                ? 'bg-amber-950/90 border-amber-400/80 text-amber-100 shadow-amber-950/60'
-                : callout.tone === 'locked'
-                ? 'bg-yellow-950/90 border-yellow-400/80 text-yellow-100 shadow-yellow-950/60'
-                : callout.tone === 'measured'
-                ? 'bg-sky-950/90 border-sky-400/80 text-sky-100 shadow-sky-950/60'
-                : 'bg-emerald-950/90 border-emerald-400/80 text-emerald-100 shadow-emerald-950/60';
+          <HoverTooltip
+            title="Full-Width Real Photo AR View"
+            description="Projects 3-layer collision zones, head-strike arcs, floor stance calipers, and AFTER modification ghosts directly onto the original indoor photograph."
+            badge="2D AR Overlay"
+            align="left"
+          >
+            <button
+              onClick={() => setViewMode('photo_ar')}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition ${
+                viewMode === 'photo_ar'
+                  ? 'bg-sky-500 text-slate-950 shadow-sm'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>Real Photo AR</span>
+            </button>
+          </HoverTooltip>
 
-            return (
+          <HoverTooltip
+            title="Full-Width 3D Architectural Twin"
+            description="Expands the interactive Three.js 3D CAD simulation with articulated human posture, mobility aid physics, and 3-layer elevation slice planes."
+            badge="WebGL 3D"
+            align="left"
+          >
+            <button
+              onClick={() => setViewMode('twin_3d')}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition ${
+                viewMode === 'twin_3d'
+                  ? 'bg-sky-500 text-slate-950 shadow-sm'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <Box className="w-3.5 h-3.5" />
+              <span>3D Architectural Twin</span>
+            </button>
+          </HoverTooltip>
+        </div>
+
+        {/* Right: 3D Camera Angle Presets & HUD Pin Toggle */}
+        {viewMode !== 'photo_ar' && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 gap-0.5">
+              {(
+                [
+                  {
+                    id: 'isometric',
+                    label: '3D Orbit',
+                    tip: 'Standard isometric 3D perspective showing all three elevation layers simultaneously.',
+                  },
+                  {
+                    id: 'head_strike',
+                    label: 'Sit-to-Stand Arc',
+                    tip: 'Side-profile camera aligned with the +28cm forward torso lean during toilet/chair stand-up to inspect Layer 3 head-strike clearance.',
+                  },
+                  {
+                    id: 'floor_stance',
+                    label: 'Floor Stance',
+                    tip: 'Low-angle corridor view focused on Layer 1 (0-30cm) floor passage width and threshold height.',
+                  },
+                  {
+                    id: 'top_down',
+                    label: 'Top Plan',
+                    tip: 'Orthographic-style overhead floor plan view to inspect 360-degree turning radii and furniture relocation vectors.',
+                  },
+                ] as { id: CameraPreset; label: string; tip: string }[]
+              ).map((preset) => (
+                <HoverTooltip
+                  key={preset.id}
+                  title={`Camera Angle: ${preset.label}`}
+                  description={preset.tip}
+                  badge="3D Camera"
+                  align="right"
+                >
+                  <button
+                    onClick={() => setCameraPreset(preset.id)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition ${
+                      cameraPreset === preset.id
+                        ? 'bg-indigo-500 text-white'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                </HoverTooltip>
+              ))}
+            </div>
+
+            <HoverTooltip
+              title="Toggle 3D-to-2D Floating HUD Callout Pins"
+              description="Shows or hides real-time floating clearance badges (e.g., Head Strike -8cm, Stance 44cm, Locked Fixture) projected above 3D objects."
+              badge="HUD Labels"
+              align="right"
+            >
               <button
-                key={callout.id}
-                ref={(el) => {
-                  hudItemRefs.current[callout.id] = el;
-                }}
-                type="button"
-                onClick={() => {
-                  if (callout.objectId) {
-                    onSelectObject(
-                      selectedObjectId === callout.objectId ? null : callout.objectId
-                    );
-                  }
-                }}
-                style={{ opacity: 0, left: 0, top: 0 }}
-                className={`absolute px-2 py-1 rounded-lg border text-left backdrop-blur-md shadow-lg transition-opacity duration-150 ${toneStyle} ${
-                  isSelected ? 'ring-2 ring-sky-400 scale-105' : 'hover:scale-105'
+                onClick={() => setShowHudCallouts((v) => !v)}
+                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1 transition ${
+                  showHudCallouts
+                    ? 'bg-amber-500/15 border-amber-400/50 text-amber-300'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
                 }`}
               >
-                <div className="text-[10px] font-bold font-mono leading-tight whitespace-nowrap">
-                  {callout.badgeText}
-                </div>
-                <div className="text-[9px] opacity-80 leading-tight whitespace-nowrap">
-                  {callout.subText}
-                </div>
+                <Tag className="w-3 h-3" />
+                <span>Pins</span>
               </button>
-            );
-          })}
-        </div>
-      )}
+            </HoverTooltip>
 
-      {/* Top-Left Status Overlay Badge */}
-      <div className="absolute top-3 left-3 flex flex-wrap items-center gap-2 pointer-events-none z-20">
-        <div
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold backdrop-blur-md border shadow-lg ${
-            remediationMode === 'BEFORE'
-              ? 'bg-rose-950/85 border-rose-500/50 text-rose-200'
-              : 'bg-emerald-950/85 border-emerald-500/50 text-emerald-200'
-          }`}
-        >
-          {remediationMode === 'BEFORE' ? (
-            <>
-              <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
-              <span>BEFORE: Unmodified Room ({hazards.length} 3D Collisions Detected)</span>
-            </>
-          ) : (
-            <>
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>AFTER: Argon 3D Remediated Patch ({hazards.length} Collisions)</span>
-            </>
-          )}
-        </div>
-
-        <div className="px-2.5 py-1 rounded-lg bg-slate-900/85 border border-slate-700/70 text-[11px] font-mono text-slate-300 backdrop-blur-md">
-          Room: {roomDimensions.width.toFixed(1)}m × {roomDimensions.depth.toFixed(1)}m ×{' '}
-          {roomDimensions.height.toFixed(1)}m
-        </div>
-      </div>
-
-      {/* Top-Right Camera Preset Controls */}
-      <div className="absolute top-3 right-3 flex flex-wrap items-center gap-1.5 bg-slate-900/90 border border-slate-700/80 p-1.5 rounded-xl backdrop-blur-md z-20">
-        {(
-          [
-            { id: 'isometric', label: '3D Orbit' },
-            { id: 'head_strike', label: 'Overhead Arc (130-195cm)' },
-            { id: 'floor_stance', label: 'Floor Stance (0-30cm)' },
-            { id: 'top_down', label: 'Top Plan' },
-          ] as Array<{ id: CameraPreset; label: string }>
-        ).map((preset) => (
-          <button
-            key={preset.id}
-            onClick={() => setCameraPreset(preset.id)}
-            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
-              cameraPreset === preset.id
-                ? 'bg-sky-500 text-slate-950 font-semibold shadow-sm'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            {preset.label}
-          </button>
-        ))}
-        <button
-          onClick={() => setShowHudCallouts((v) => !v)}
-          title="Toggle 3D Floating HUD Callout Badges"
-          className={`px-2 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1 transition ${
-            showHudCallouts
-              ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
-              : 'text-slate-400 hover:bg-slate-800'
-          }`}
-        >
-          <Tag className="w-3 h-3" />
-          <span>HUD</span>
-        </button>
-        <button
-          onClick={() => setShowLayerSlices((v) => !v)}
-          title="Toggle 3D Elevation Slice Planes"
-          className={`p-1.5 rounded-lg text-xs transition ${
-            showLayerSlices ? 'bg-slate-800 text-sky-400' : 'text-slate-400 hover:bg-slate-800'
-          }`}
-        >
-          <Layers className="w-3.5 h-3.5" />
-        </button>
-        <button
-          onClick={() => setCameraPreset('isometric')}
-          title="Reset Camera"
-          className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {/* Elevation Layer Legend (Left Side) */}
-      <div className="absolute left-3 bottom-16 hidden sm:flex flex-col gap-1.5 bg-slate-900/85 border border-slate-800/90 p-2.5 rounded-xl backdrop-blur-md text-[11px] pointer-events-none z-20">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-0.5">
-          3D Volumetric Check Layers
-        </div>
-        <div className="flex items-center gap-2 text-rose-300">
-          <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" />
-          <span>Overhead Layer (130–195cm): Sit-to-Stand Head Arc</span>
-        </div>
-        <div className="flex items-center gap-2 text-amber-300">
-          <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
-          <span>Mid Layer (30–130cm): Turning Ø &amp; Grab Bar Transfer</span>
-        </div>
-        <div className="flex items-center gap-2 text-sky-300">
-          <span className="w-2.5 h-2.5 rounded-full bg-sky-400 inline-block" />
-          <span>Floor Layer (0–30cm): Crutch Stance, Clutter &amp; Threshold</span>
-        </div>
-      </div>
-
-      {/* Selected Object Inspector Popup (Right Bottom) */}
-      {selectedObj && (
-        <div className="absolute right-3 bottom-16 max-w-xs bg-slate-900/95 border border-sky-500/50 p-3 rounded-xl backdrop-blur-md shadow-xl text-xs z-20">
-          <div className="flex items-center justify-between gap-2 mb-1">
-            <span className="font-semibold text-sky-300 truncate">{selectedObj.name}</span>
-            <button
-              onClick={() => onSelectObject(null)}
-              className="text-slate-400 hover:text-white text-[11px]"
+            <HoverTooltip
+              title="Toggle 3-Layer Elevation Planes"
+              description="Displays translucent horizontal reference planes at Floor (0-30cm), Mid (30-130cm), and Overhead Head-Strike (130-195cm) heights."
+              badge="3 Layers"
+              align="right"
             >
-              ✕
-            </button>
-          </div>
-          <div className="text-[11px] text-slate-400 mb-1.5">{selectedObj.koreanName}</div>
-          <div className="grid grid-cols-2 gap-1 text-[11px] font-mono bg-slate-950/70 p-1.5 rounded-lg mb-1.5">
-            <div>Layer: {selectedObj.layer.toUpperCase()}</div>
-            <div>
-              Size: {Math.round(selectedObj.dimensions.width * 100)}×
-              {Math.round(selectedObj.dimensions.height * 100)}×
-              {Math.round(selectedObj.dimensions.depth * 100)}cm
-            </div>
-          </div>
-          <p className="text-[11px] text-slate-300 leading-relaxed">{selectedObj.evidenceNote}</p>
-          {selectedObj.uncertaintyNote && (
-            <p className="mt-1 text-[10px] text-amber-300/90 bg-amber-950/50 border border-amber-500/30 px-2 py-1 rounded">
-              ⚠️ {selectedObj.uncertaintyNote}
-            </p>
-          )}
-          {selectedObj.lockedByUser && (
-            <div className="mt-1.5 flex items-center gap-1 text-[10px] text-yellow-300 font-medium">
-              <Lock className="w-3 h-3" /> Locked by Caregiver (HITL Constraint)
-            </div>
-          )}
-        </div>
-      )}
+              <button
+                onClick={() => setShowLayerSlices((v) => !v)}
+                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1 transition ${
+                  showLayerSlices
+                    ? 'bg-sky-500/15 border-sky-400/50 text-sky-300'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                <Layers className="w-3 h-3" />
+                <span>Planes</span>
+              </button>
+            </HoverTooltip>
 
-      {/* Bottom Active Waypoint Kinematic Bar */}
-      {activeWaypoint && (
-        <div className="absolute bottom-3 inset-x-3 bg-slate-900/90 border border-slate-700/80 px-3.5 py-2 rounded-xl backdrop-blur-md flex flex-col sm:flex-row sm:items-center justify-between gap-2 z-20">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="px-2 py-0.5 rounded bg-sky-500/20 border border-sky-400/40 text-sky-300 font-mono text-xs font-semibold shrink-0">
-              Step {activeWaypoint.stepNumber}/{waypoints.length}
-            </span>
-            <div className="truncate">
-              <span className="text-xs font-semibold text-white mr-2">{activeWaypoint.label}</span>
-              <span className="text-xs text-slate-300 hidden md:inline">
-                — {activeWaypoint.description}
-              </span>
+            <HoverTooltip
+              title="Reset 3D Camera Orbit"
+              description="Resets the 3D camera back to the default isometric perspective and zoom distance."
+              badge="Reset"
+              align="right"
+            >
+              <button
+                onClick={() => setCameraPreset('isometric')}
+                className="p-1.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-400 hover:text-white transition"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            </HoverTooltip>
+          </div>
+        )}
+      </div>
+
+      {/* =====================================================================
+          MAIN VIEWPORT AREA: SPLIT HYBRID OR FULL-WIDTH
+      ===================================================================== */}
+      <div
+        className={`grid ${
+          viewMode === 'split'
+            ? 'grid-cols-1 xl:grid-cols-2 divide-y xl:divide-y-0 xl:divide-x divide-slate-800'
+            : 'grid-cols-1'
+        }`}
+      >
+        {/* PANEL A: REAL PHOTO AR SIMULATION OVERLAY */}
+        {(viewMode === 'split' || viewMode === 'photo_ar') && (
+          <div className="w-full h-[460px] sm:h-[500px] p-2.5 bg-slate-950">
+            <PhotoAROverlay
+              photoUrl={photoUrl}
+              roomTitle={roomTitle}
+              roomDimensions={roomDimensions}
+              objects={objects}
+              beforeObjects={beforeObjects}
+              waypoints={waypoints}
+              activeWaypointIndex={activeWaypointIndex}
+              hazards={hazards}
+              profile={profile}
+              remediationMode={remediationMode}
+              activeLayerFilter={activeLayerFilter}
+              selectedObjectId={selectedObjectId}
+              onSelectObject={onSelectObject}
+            />
+          </div>
+        )}
+
+        {/* PANEL B: HIGH-DETAIL 3D ARCHITECTURAL DIGITAL TWIN */}
+        {(viewMode === 'split' || viewMode === 'twin_3d') && (
+          <div className="relative w-full h-[460px] sm:h-[500px] bg-slate-950 overflow-hidden select-none">
+            {/* Compact Top-Left Status Pill inside 3D Twin (No right-side overlap!) */}
+            <div className="absolute top-3 left-3 z-10 pointer-events-none flex items-center gap-2">
+              <div
+                className={`px-3 py-1 rounded-xl border backdrop-blur-md text-[11px] font-bold flex items-center gap-1.5 shadow-lg ${
+                  remediationMode === 'BEFORE'
+                    ? 'bg-rose-950/85 border-rose-500/60 text-rose-200'
+                    : 'bg-emerald-950/85 border-emerald-500/60 text-emerald-200'
+                }`}
+              >
+                {remediationMode === 'BEFORE' ? (
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                ) : (
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                )}
+                <span>3D Architectural Twin ({remediationMode})</span>
+              </div>
             </div>
+
+            {/* WebGL Mount Point */}
+            <div
+              ref={mountRef}
+              className="w-full h-full cursor-grab active:cursor-grabbing"
+            />
+
+            {/* De-Cluttered 1-Line 3D-to-2D Floating Pins (With Vertical Repulsion) */}
+            {showHudCallouts && (
+              <div className="absolute inset-0 pointer-events-none overflow-hidden z-10">
+                {hudCallouts.map((item) => {
+                  const isSelected = item.objectId && item.objectId === selectedObjectId;
+                  const toneStyles: Record<HudCalloutDescriptor['tone'], string> = {
+                    critical:
+                      'bg-rose-950/90 border-rose-400 text-rose-100 shadow-rose-950/50',
+                    warning:
+                      'bg-amber-950/90 border-amber-400 text-amber-100 shadow-amber-950/50',
+                    locked:
+                      'bg-amber-950/95 border-amber-300 text-amber-200 shadow-amber-950/50',
+                    measured:
+                      'bg-sky-950/90 border-sky-400 text-sky-100 shadow-sky-950/50',
+                    remediated:
+                      'bg-emerald-950/90 border-emerald-400 text-emerald-100 shadow-emerald-950/50',
+                  };
+
+                  return (
+                    <button
+                      key={item.id}
+                      ref={(el) => {
+                        hudItemRefs.current[item.id] = el;
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (item.objectId) onSelectObject(item.objectId);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: 0,
+                        top: 0,
+                        opacity: 0,
+                      }}
+                      className={`px-2.5 py-1 rounded-full border text-[11px] font-bold backdrop-blur-md shadow-lg transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                        toneStyles[item.tone]
+                      } ${isSelected ? 'ring-2 ring-sky-300 scale-105' : 'hover:brightness-110'}`}
+                    >
+                      <span>{item.badgeText}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Compact Bottom-Left Step Indicator inside 3D Twin */}
+            {activeWp && (
+              <div className="absolute bottom-3 left-3 right-3 z-10 flex items-center justify-between gap-2 pointer-events-none">
+                <div className="px-3 py-1.5 rounded-xl bg-slate-950/85 border border-slate-800 backdrop-blur-md text-[11px] text-slate-300 flex items-center gap-2">
+                  <Eye className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  <span className="font-semibold text-white">
+                    Step {activeWp.stepNumber}: {activeWp.label}
+                  </span>
+                  <span className="text-slate-500 hidden sm:inline">·</span>
+                  <span className="font-mono text-sky-300 hidden sm:inline">
+                    Head Y={Math.round(activeWp.headHeightM * 100)}cm
+                  </span>
+                </div>
+
+                <div className="px-2.5 py-1 rounded-lg bg-slate-950/80 border border-slate-800/80 text-[10px] text-slate-400 hidden sm:block">
+                  Drag to orbit · Scroll to zoom · Click fixture
+                </div>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-3 text-[11px] font-mono text-slate-300 shrink-0">
-            <span>Torso Pitch: +{activeWaypoint.torsoForwardPitchDeg}°</span>
-            <span>Head Y: {Math.round(activeWaypoint.headHeightM * 100)}cm</span>
-            <span className="text-slate-400 hidden sm:inline">
-              <Eye className="w-3.5 h-3.5 inline mr-1" />
-              Drag to orbit · Scroll to zoom · Click box/HUD to inspect
-            </span>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };

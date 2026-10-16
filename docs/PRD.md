@@ -21,7 +21,7 @@ Given a single indoor room photo and the resident's biometric & mobility-aid con
 ## 2. Problem Statement & Real-Life Origin Story
 
 ### 2.1 The Real Accident Behind HomeFit 3D: Why 2D Grab-Bar Checklists Fail
-Our team member's parent uses crutches daily inside the home. In their bathroom, a stainless-steel **wall grab bar** was already installed next to the toilet. According to conventional 2D accessibility checklists, this bathroom passed as *"Accessible (Grab Bar Present)"*.
+My parent uses crutches daily inside the home. In their bathroom, a stainless-steel **wall grab bar** was already installed next to the toilet. According to conventional 2D accessibility checklists, this bathroom passed as *"Accessible (Grab Bar Present)"*.
 
 However, a severe accident occurred: while stepping around plastic floor basins and bath caddies on wet ceramic tiles to sit and stand using crutches, their crutch stance narrowed to `44cm`. As they rose from the toilet (`Sit-to-Stand`), their torso and head pitched forward `+28cm` into a **protruding overhead tempered-glass cabinet (`Y = 128cm–178cm`)**, shattering tempered glass across the bathroom floor.
 
