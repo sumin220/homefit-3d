@@ -2,7 +2,7 @@
   "name": "homefit-3d",
   "version": "1.0.0",
   "private": true,
-  "description": "HomeFit 3D (먼저가봄 홈) — 3D Indoor Mobility & Head-to-Toe Hazard Physics Verifier powered by Gemini 4 Argon",
+  "description": "HomeFit 3D (Pre-Visit Home Safety Studio) — 3D Indoor Mobility & Head-to-Toe Hazard Physics Verifier powered by Gemini 4 Argon",
   "type": "module",
   "scripts": {
     "dev": "tsx src/server/index.ts",
