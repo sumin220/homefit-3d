@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 540" fill="none">
+  <rect width="800" height="540" fill="#1e293b"/>
+  <!-- Perspective room walls & floor -->
+  <polygon points="0,0 800,0 640,140 160,140" fill="#334155"/>
+  <polygon points="0,0 160,140 160,390 0,540" fill="#475569"/>
+  <polygon points="800,0 640,140 640,390 800,540" fill="#3b495e"/>
+  <polygon points="160,140 640,140 640,390 160,390" fill="#64748b"/>
+  <polygon points="160,390 640,390 800,540 0,540" fill="#8b5e3c"/>
+  <!-- Bedroom doorway in back -->
+  <rect x="330" y="165" width="160" height="225" fill="#1e293b" stroke="#cbd5e1" stroke-width="4"/>
+  <!-- 3.5cm Wooden Threshold -->
+  <rect x="330" y="382" width="160" height="12" fill="#d97706" stroke="#fef08a" stroke-width="2"/>
+  <text x="410" y="376" fill="#fef08a" font-family="Inter, sans-serif" font-size="11" font-weight="700" text-anchor="middle">3.5cm Threshold Lip</text>
+  <!-- Heavy Glass Display Cabinet (Left Back, Locked) -->
+  <rect x="175" y="175" width="125" height="215" fill="#78350f" stroke="#f59e0b" stroke-width="2"/>
+  <rect x="188" y="190" width="98" height="130" fill="#38bdf8" fill-opacity="0.25" stroke="#7dd3fc" stroke-width="1.5"/>
+  <text x="237" y="255" fill="#f8fafc" font-family="Inter, sans-serif" font-size="11" font-weight="700" text-anchor="middle">Heavy Glass Cabinet</text>
+  <text x="237" y="272" fill="#fbbf24" font-family="Inter, sans-serif" font-size="10" text-anchor="middle">[LOCKED: Too Heavy]</text>
+  <!-- Protruding Overhead Wall Shelf (Right Back) -->
+  <rect x="495" y="205" width="130" height="36" fill="#ef4444" fill-opacity="0.85" stroke="#fecaca" stroke-width="2"/>
+  <text x="560" y="227" fill="#ffffff" font-family="Inter, sans-serif" font-size="11" font-weight="700" text-anchor="middle">Low Wall Shelf (Y=146cm)</text>
+  <!-- Sofa (Left Foreground) -->
+  <rect x="35" y="310" width="245" height="150" rx="10" fill="#334155" stroke="#94a3b8" stroke-width="3"/>
+  <text x="157" y="390" fill="#e2e8f0" font-family="Inter, sans-serif" font-size="14" font-weight="700" text-anchor="middle">Fixed 3-Seater Sofa</text>
+  <!-- Dining Table (Right Foreground) -->
+  <rect x="455" y="315" width="265" height="145" rx="8" fill="#92400e" stroke="#fdba74" stroke-width="3"/>
+  <text x="587" y="390" fill="#ffedd5" font-family="Inter, sans-serif" font-size="14" font-weight="700" text-anchor="middle">Dining Table (Movable)</text>
+  <!-- 56cm Pinch Point Arrow -->
+  <line x1="285" y1="385" x2="450" y2="385" stroke="#f43f5e" stroke-width="4" stroke-dasharray="6,4"/>
+  <rect x="305" y="355" width="125" height="24" rx="4" fill="#e11d48"/>
+  <text x="367" y="371" fill="#ffffff" font-family="Inter, sans-serif" font-size="12" font-weight="700" text-anchor="middle">56cm PINCH FAIL!</text>
+  <!-- Loose Throw Rug -->
+  <polygon points="260,465 540,465 590,525 210,525" fill="#d97706" fill-opacity="0.65" stroke="#fde047" stroke-width="2" stroke-dasharray="5,5"/>
+  <text x="400" y="500" fill="#fef9c3" font-family="Inter, sans-serif" font-size="12" font-weight="700" text-anchor="middle">Curled Throw Rug (Crutch / Caster Catch)</text>
+</svg>
