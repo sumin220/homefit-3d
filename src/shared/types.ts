@@ -1,4 +1,4 @@
-export type MobilityAidType = 'crutches' | 'wheelchair';
+export type MobilityAidType = 'crutches' | 'wheelchair' | 'walker' | 'cane_grab_bar';
 
 export type ElevationLayer = 'floor' | 'mid' | 'overhead';
 

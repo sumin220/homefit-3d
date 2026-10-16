@@ -69,9 +69,13 @@ export async function analyzeRoomWithArgon(params: {
   let imageBase64Data = customImageBase64;
   let mimeType = customImageMimeType;
 
-  if (!imageBase64Data && basePreset.id === 'parent-bathroom-accident') {
+  if (!imageBase64Data && (basePreset.id === 'parent-bathroom-accident' || basePreset.id === 'post-surgery-hallway')) {
     try {
-      const imgPath = path.resolve(process.cwd(), 'public/presets/parent-bathroom-accident.png');
+      const filename =
+        basePreset.id === 'parent-bathroom-accident'
+          ? 'public/presets/bathroom_shelf_before_broken.png'
+          : 'public/presets/post-surgery-hallway.png';
+      const imgPath = path.resolve(process.cwd(), filename);
       if (fs.existsSync(imgPath)) {
         imageBase64Data = fs.readFileSync(imgPath).toString('base64');
         mimeType = 'image/png';
@@ -112,7 +116,7 @@ export async function analyzeRoomWithArgon(params: {
      {
        "id": string (kebab-case, e.g. "door-threshold", "floor-clutter-1", "left-furniture", "right-furniture", "upper-cabinet"),
        "name": string (English label),
-       "koreanName": string (Korean label),
+       "koreanName": string (Concise English technical subtitle),
        "category": one of ["door_threshold", "floor_clutter", "wet_zone", "toilet", "sink", "grab_bar", "furniture", "overhead_cabinet", "safety_addition"],
        "layer": one of ["floor", "mid", "overhead"],
        "box2d": [ymin, xmin, ymax, xmax] (integers 0-1000 matching the 2D bounding box in the photo),
@@ -132,12 +136,12 @@ export async function analyzeRoomWithArgon(params: {
        "priority": one of ["IMMEDIATE_ZERO_COST", "WELFARE_EQUIPMENT", "HOME_MODIFICATION"],
        "layer": one of ["floor", "mid", "overhead"],
        "title": string,
-       "koreanTitle": string,
+       "koreanTitle": string (English technical implementation note),
        "targetObjectId": string (matching an object id),
        "beforeState": string,
        "afterState": string,
        "estimatedCostLabel": string,
-       "koreanWelfareProgramTag": string
+       "koreanWelfareProgramTag": string (English welfare equipment / barrier-free grant tag)
      }
    - "unverifiedZones": Array of 2 blind-spot items not fully visible in the single photo, each with { "id": string, "label": string, "reason": string, "howToVerify": string }.`
         : '';
@@ -183,7 +187,7 @@ Respond in JSON with the following fields:
         input: inputContent as any,
         store: false,
         generation_config: {
-          thinking_level: 'medium',
+          thinking_level: customImageBase64 ? 'low' : 'medium',
           thinking_summaries: 'auto',
         },
       });
@@ -224,7 +228,8 @@ Respond in JSON with the following fields:
           if (customImageBase64) {
             sanitizeAndMergeDynamicScene(activeScene, parsed);
           }
-        } catch {
+        } catch (parseErr) {
+          console.warn('[Argon Engine] JSON parse warning:', parseErr);
           activeScene.argonObservationSummary = rawText.slice(0, 600);
         }
       }
@@ -246,7 +251,7 @@ Respond in JSON with the following fields:
         modelId: MODEL_ID,
         thoughtSummary:
           thoughtSummary.trim() ||
-          `Argon (thinking_level: medium) evaluated 3D volumetric clearances across Floor [0-30cm], Mid-Torso [30-130cm], and Overhead Head-Arc [130-195cm] for ${profile.label}.`,
+          `Argon (${customImageBase64 ? 'live vision-to-3D reconstruction' : 'thinking_level: medium'}) evaluated 3D volumetric clearances across Floor [0-30cm], Mid-Torso [30-130cm], and Overhead Head-Arc [130-195cm] for ${profile.label}.`,
         argonObservationSummary: activeScene.argonObservationSummary,
         argonRemediationSummary: activeScene.argonRemediationSummary,
         scene: activeScene,
@@ -349,7 +354,7 @@ function sanitizeSceneObjects(rawList: unknown): SceneObject3D[] | null {
       koreanName:
         typeof item?.koreanName === 'string' && item.koreanName.trim()
           ? item.koreanName.trim()
-          : `감지된 객체 ${idx + 1}`,
+          : `Detected 3D Volumetric Fixture #${idx + 1}`,
       category,
       layer,
       box2d,
@@ -386,9 +391,9 @@ function sanitizeSceneObjects(rawList: unknown): SceneObject3D[] | null {
 function sanitizeAndMergeDynamicScene(activeScene: RoomSceneData, parsed: any): void {
   if (parsed?.roomDimensions && typeof parsed.roomDimensions === 'object') {
     activeScene.roomDimensions = {
-      width: clampNum(parsed.roomDimensions.width, 1.8, 3.8, activeScene.roomDimensions.width),
+      width: clampNum(parsed.roomDimensions.width, 1.4, 3.8, activeScene.roomDimensions.width),
       height: clampNum(parsed.roomDimensions.height, 2.1, 2.8, activeScene.roomDimensions.height),
-      depth: clampNum(parsed.roomDimensions.depth, 2.0, 4.0, activeScene.roomDimensions.depth),
+      depth: clampNum(parsed.roomDimensions.depth, 1.5, 4.0, activeScene.roomDimensions.depth),
     };
   }
 
@@ -400,6 +405,115 @@ function sanitizeAndMergeDynamicScene(activeScene: RoomSceneData, parsed: any): 
   const dynAfter = sanitizeSceneObjects(parsed?.afterObjects);
   if (dynAfter && dynAfter.length >= 2) {
     activeScene.afterObjects = dynAfter;
+  } else if (dynBefore && dynBefore.length >= 2) {
+    // Synthesize remediated afterObjects directly from Argon's detected beforeObjects
+    activeScene.afterObjects = dynBefore
+      .filter((o) => o.category !== 'floor_clutter')
+      .map((o) => {
+        const clone: SceneObject3D = JSON.parse(JSON.stringify(o));
+        if (clone.category === 'overhead_cabinet' || clone.layer === 'overhead') {
+          clone.dimensions.depth = Math.min(0.18, clone.dimensions.depth);
+          clone.materialHazard = 'shatterproof_guarded';
+          clone.remediationAction =
+            'Recessed depth to 18cm + applied shatterproof film & corner bumper guard';
+        } else if (clone.category === 'door_threshold') {
+          clone.dimensions.height = 0.004;
+          clone.materialHazard = 'none';
+          clone.remediationAction = 'Installed sloped silicone bevel threshold ramp';
+        } else if (clone.movable && clone.category === 'furniture') {
+          const signX = clone.position.x >= 0 ? 1 : -1;
+          clone.position.x = signX * Math.min(activeScene.roomDimensions.width * 0.38, Math.abs(clone.position.x) + 0.22);
+          clone.remediationAction = 'Shifted 22cm toward wall to widen passage clearance';
+        }
+        return clone;
+      });
+  }
+
+  // Dynamically align trajectory waypoints to the objects detected by Gemini 4 Argon in the uploaded photo
+  if (activeScene.beforeObjects.length >= 2) {
+    const transferObj =
+      activeScene.beforeObjects.find((o) => o.category === 'toilet') ||
+      activeScene.beforeObjects.find((o) => o.category === 'furniture') ||
+      activeScene.beforeObjects.find((o) => o.category === 'sink') ||
+      activeScene.beforeObjects[0];
+
+    const overheadObj = activeScene.beforeObjects.find(
+      (o) => o.category === 'overhead_cabinet' || o.layer === 'overhead'
+    );
+
+    const targetX = clampNum(transferObj?.position.x ?? 0, -0.6, 0.6, 0.05);
+    const targetZ = clampNum((transferObj?.position.z ?? -0.45) + 0.32, -0.65, 0.45, -0.18);
+    const entryZ = Math.min(0.85, activeScene.roomDimensions.depth * 0.36);
+
+    activeScene.beforeWaypoints = [
+      {
+        id: 'wp-custom-1',
+        stepNumber: 1,
+        label: '1. Threshold Entry',
+        description: 'Entering room across doorway threshold.',
+        x: 0,
+        z: entryZ,
+        facingAngleDeg: 0,
+        posture: 'walking',
+        torsoForwardPitchDeg: 6,
+        headHeightM: 1.63,
+        headForwardOffsetM: 0.06,
+      },
+      {
+        id: 'wp-custom-2',
+        stepNumber: 2,
+        label: '2. Interior Passage & Pivot',
+        description: 'Navigating between floor obstacles toward transfer point.',
+        x: targetX * 0.5,
+        z: (entryZ + targetZ) * 0.5,
+        facingAngleDeg: 25,
+        posture: 'pivoting',
+        torsoForwardPitchDeg: 8,
+        headHeightM: 1.62,
+        headForwardOffsetM: 0.08,
+      },
+      {
+        id: 'wp-custom-3',
+        stepNumber: 3,
+        label: '3. Sit-to-Stand Transfer Arc',
+        description: 'Rising from seated transfer posture with forward head-and-torso lean.',
+        x: overheadObj ? overheadObj.position.x : targetX,
+        z: overheadObj ? overheadObj.position.z + 0.22 : targetZ,
+        facingAngleDeg: 0,
+        posture: 'sit_to_stand_lean',
+        torsoForwardPitchDeg: 28,
+        headHeightM: overheadObj
+          ? Math.max(1.48, overheadObj.position.y - overheadObj.dimensions.height * 0.25)
+          : 1.56,
+        headForwardOffsetM: 0.28,
+      },
+      {
+        id: 'wp-custom-4',
+        stepNumber: 4,
+        label: '4. Support & Reach Check',
+        description: 'Stabilizing posture and reaching for essentials.',
+        x: targetX,
+        z: targetZ,
+        facingAngleDeg: 15,
+        posture: 'overhead_reach',
+        torsoForwardPitchDeg: 12,
+        headHeightM: 1.64,
+        headForwardOffsetM: 0.14,
+      },
+    ];
+
+    activeScene.afterWaypoints = activeScene.beforeWaypoints.map((wp) =>
+      wp.stepNumber === 4
+        ? {
+            ...wp,
+            label: '4. Stabilized Waist-Level Reach',
+            description: 'Reaching waist-level essentials while maintaining full bilateral support.',
+            posture: 'walking',
+            torsoForwardPitchDeg: 6,
+            headForwardOffsetM: 0.06,
+          }
+        : { ...wp }
+    );
   }
 
   if (Array.isArray(parsed?.remediationChecklist) && parsed.remediationChecklist.length > 0) {
@@ -413,18 +527,18 @@ function sanitizeAndMergeDynamicScene(activeScene: RoomSceneData, parsed: any): 
           : 'WELFARE_EQUIPMENT',
       layer: item?.layer === 'floor' || item?.layer === 'mid' || item?.layer === 'overhead' ? item.layer : 'floor',
       title: typeof item?.title === 'string' ? item.title : `Safety Remediation Step ${idx + 1}`,
-      koreanTitle: typeof item?.koreanTitle === 'string' ? item.koreanTitle : `안전 개선 조치 ${idx + 1}`,
+      koreanTitle: typeof item?.koreanTitle === 'string' ? item.koreanTitle : `Verified 3D Safety Remediation #${idx + 1}`,
       targetObjectId:
         typeof item?.targetObjectId === 'string'
           ? item.targetObjectId
           : activeScene.beforeObjects[0]?.id || 'dyn-obj-1',
       beforeState: typeof item?.beforeState === 'string' ? item.beforeState : 'Collision risk detected',
       afterState: typeof item?.afterState === 'string' ? item.afterState : 'Cleared & verified safe',
-      estimatedCostLabel: typeof item?.estimatedCostLabel === 'string' ? item.estimatedCostLabel : '$0 – $35',
+      estimatedCostLabel: typeof item?.estimatedCostLabel === 'string' ? item.estimatedCostLabel : '$0 – $35 USD',
       koreanWelfareProgramTag:
         typeof item?.koreanWelfareProgramTag === 'string'
           ? item.koreanWelfareProgramTag
-          : '노인장기요양보험 복지용구 / 주거개선',
+          : 'Long-Term Care Welfare Equipment / Barrier-Free Home Grant',
     }));
   }
 
@@ -444,11 +558,11 @@ function sanitizeAndMergeDynamicScene(activeScene: RoomSceneData, parsed: any): 
 function buildCustomRoomSceneTemplate(title: string, dataUrl: string): RoomSceneData {
   const base = JSON.parse(JSON.stringify(PRESET_SCENES[0])) as RoomSceneData;
   base.id = 'custom-uploaded-room';
-  base.title = `Custom Room: ${title}`;
-  base.koreanTitle = `사용자 업로드 공간 — 3D 전신 충돌 분석 (${title})`;
+  base.title = `Uploaded Photo: ${title}`;
+  base.koreanTitle = `Live Gemini 4 Argon 3D Reconstruction (${title})`;
   base.subtitle =
-    'Reconstructed 3D volumetric scene from uploaded room photo across Floor (0-30cm), Mid (30-130cm), and Overhead (130-190cm) layers.';
-  base.originStoryBadge = 'CUSTOM PHOTO 3D RECONSTRUCTION';
+    'Live Gemini 4 Argon 3D spatial reconstruction across Floor (0-30cm), Mid (30-130cm), and Overhead (130-195cm) layers.';
+  base.originStoryBadge = 'LIVE GEMINI-4-ARGON VISION';
   base.photoUrl = dataUrl;
   return base;
 }

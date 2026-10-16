@@ -38,7 +38,7 @@ export class ArgonService {
     return {
       status: 'ok',
       framework: 'NestJS',
-      service: 'HomeFit 3D (먼저가봄 홈) NestJS API',
+      service: 'HomeFit 3D (Pre-Visit Home Safety Studio) NestJS API',
       model: 'gemini-4-argon',
       liveApiConfigured: hasApiKey,
       timestamp: new Date().toISOString(),
