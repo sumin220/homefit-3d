@@ -2,6 +2,7 @@
 **3D Indoor Mobility & Head-to-Toe Hazard Physics Verifier Powered by Gemini 4 Argon (`gemini-4-argon`)**
 
 - 🌐 **Live Cloud Run Deployment:** [https://homefit-3d-778497310901.asia-northeast3.run.app](https://homefit-3d-778497310901.asia-northeast3.run.app)
+- 🎬 **60-Second Demo Video (YouTube):** [https://www.youtube.com/watch?v=GocdcMn5N7E](https://www.youtube.com/watch?v=GocdcMn5N7E)
 
 > **Google DeepMind AI Hackathon — Track 3: Google AI for Social Good**
 > *Accessibility doesn't stop at the floor. Born from a real accident where a crutch-using parent struck an overhead glass cabinet while navigating a cramped bathroom, HomeFit 3D uses Gemini 4 Argon (`gemini-4-argon`) to reconstruct home photos into an interactive Three.js 3D space, run 3D head-to-toe kinematic collision simulations, and autonomously verify safer room layouts.*
